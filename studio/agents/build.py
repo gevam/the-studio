@@ -109,19 +109,19 @@ class ClaudeCodeAgent:
             "-p",
             "--output-format", "json",
             "--add-dir", project_path,
-            prompt,
         ]
 
         start = time.monotonic()
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=project_path,
             )
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout_seconds
+                proc.communicate(input=prompt.encode()), timeout=timeout_seconds
             )
         except asyncio.TimeoutError:
             raise RuntimeError(f"Claude Code timed out after {timeout_seconds}s")

@@ -75,7 +75,7 @@ async def skeleton_build_node(state: GraphState, *, db, llm, prompt_loader, **_)
     output = await run_build_agent(agent_input, db, llm, prompt_loader)
 
     # Update slice with quality metrics
-    slice_row.status = "built"
+    slice_row.status = "done"
     if output.metrics:
         slice_row.test_coverage = output.metrics.coverage_pct
         slice_row.cyclomatic_complexity = output.metrics.max_cyclomatic_complexity

@@ -23,24 +23,24 @@ class DesignSection(BaseModel):
 class ModuleBoundary(BaseModel):
     name: str
     responsibility: str
-    interfaces: list[str]
-    dependencies: list[str]
-    injection_points: list[str]
+    interfaces: list[str] = []
+    dependencies: list[str] = []
+    injection_points: list[str] = []
 
 
 class DataEntity(BaseModel):
     name: str
-    fields: list[dict]
-    relationships: list[str]
-    privacy_classification: str  # "public" | "internal" | "sensitive" | "pii"
+    fields: list[dict] = []
+    relationships: list[str] = []
+    privacy_classification: str = "internal"
 
 
 class UXFlow(BaseModel):
     name: str
-    steps: list[str]
-    entry_point: str
-    success_criteria: str
-    error_states: list[str]
+    steps: list[str] = []
+    entry_point: str = ""
+    success_criteria: str = ""
+    error_states: list[str] = []
     i18n_considerations: list[str] = []
 
 
@@ -58,18 +58,18 @@ class ArchitectureDecision(BaseModel):
 class ThreatModelEntry(BaseModel):
     threat_type: str  # S/T/R/I/D/E
     description: str
-    component: str
-    mitigation: str
-    status: str  # "open" | "mitigated" | "accepted"
+    component: str = ""
+    mitigation: str = ""
+    status: str = "open"  # "open" | "mitigated" | "accepted"
 
 
 class PrivacyDataItem(BaseModel):
     data_element: str
-    classification: str
-    purpose: str
-    retention: str
-    encryption: str
-    erasure_path: str
+    classification: str = "internal"
+    purpose: str = ""
+    retention: str = ""
+    encryption: str = ""
+    erasure_path: str = ""
 
 
 class LivingDesign(BaseModel):

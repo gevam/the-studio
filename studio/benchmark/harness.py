@@ -189,7 +189,8 @@ async def run_studio_benchmark(
             },
         )
         db.add(session_row)
-        for i, req in enumerate(project.requirements):
+        await db.flush()  # persist session before FK-constrained requirements
+        for req in project.requirements:
             db.add(Requirement(
                 session_id=session_id,
                 title=req,

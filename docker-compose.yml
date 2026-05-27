@@ -19,7 +19,7 @@ services:
         condition: service_healthy
     user: "1000:1000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -111,14 +111,25 @@ services:
       - "4317:4317"
       - "4318:4318"
 
+  loki-init:
+    image: busybox:latest
+    user: "0:0"
+    volumes:
+      - loki-data:/var/loki
+    command: ["sh", "-c", "chown -R 10001:10001 /var/loki"]
+
   loki:
     image: grafana/loki:latest
+    user: "10001:10001"
     ports:
       - "3100:3100"
     volumes:
       - ./observability/loki.yml:/etc/loki/local-config.yaml
       - loki-data:/var/loki
     command: -config.file=/etc/loki/local-config.yaml
+    depends_on:
+      loki-init:
+        condition: service_completed_successfully
 
   promtail:
     image: grafana/promtail:latest

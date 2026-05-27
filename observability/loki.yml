@@ -14,7 +14,7 @@ ingester:
   chunk_idle_period: 5m
   chunk_retain_period: 30s
   wal:
-    dir: /tmp/loki/wal
+    dir: /var/loki/wal
 
 schema_config:
   configs:
@@ -28,13 +28,13 @@ schema_config:
 
 storage_config:
   tsdb_shipper:
-    active_index_directory: /tmp/loki/index
-    cache_location: /tmp/loki/cache
+    active_index_directory: /var/loki/index
+    cache_location: /var/loki/cache
   filesystem:
-    directory: /tmp/loki/chunks
+    directory: /var/loki/chunks
 
 compactor:
-  working_directory: /tmp/loki/compactor
+  working_directory: /var/loki/compactor
 
 limits_config:
   reject_old_samples: true

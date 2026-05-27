@@ -3,7 +3,8 @@
 import hashlib
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
+from typing import Any
 
 
 class DesignSection(BaseModel):
@@ -97,6 +98,30 @@ class LivingDesign(BaseModel):
 
     # Sections index
     sections: list[DesignSection] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def unwrap_llm_quirks(cls, data: Any) -> Any:
+        """Normalize LLM output quirks before validation.
+
+        LLMs sometimes wrap list fields in dicts, e.g.:
+          data_model: {"entities": [...]} → data_model: [...]
+          modules: {"modules": [...]}     → modules: [...]
+        """
+        if not isinstance(data, dict):
+            return data
+        for field in ("data_model", "modules", "ux_flows", "architecture_decisions",
+                      "threat_model", "privacy_inventory", "sections"):
+            val = data.get(field)
+            if isinstance(val, dict):
+                # Take the first list-valued key in the dict
+                for v in val.values():
+                    if isinstance(v, list):
+                        data[field] = v
+                        break
+                else:
+                    data[field] = []
+        return data
 
     def compute_and_set_hash(self) -> "LivingDesign":
         content = self.model_dump_json(exclude={"content_hash"})

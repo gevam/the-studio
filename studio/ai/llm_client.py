@@ -192,10 +192,10 @@ class ClaudeCLIProvider:
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input=full_prompt.encode()), timeout=300
+                proc.communicate(input=full_prompt.encode()), timeout=600
             )
         except asyncio.TimeoutError:
-            raise RuntimeError("Claude CLI timed out after 300s")
+            raise RuntimeError("Claude CLI timed out after 600s")
         except FileNotFoundError:
             raise RuntimeError(
                 f"Claude CLI not found at {self._cli_path}. "

@@ -1,0 +1,16 @@
+version: "3.9"
+
+# Local dev overrides: hot-reload, exposed debug ports
+services:
+  backend:
+    command: uvicorn studio.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+    environment:
+      - LOG_LEVEL=DEBUG
+
+  worker:
+    volumes:
+      - .:/app
+    environment:
+      - LOG_LEVEL=DEBUG

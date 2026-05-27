@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+*.eggs/
+.venv/
+venv/
+env/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets — never commit
+.env.local
+.env.staging
+.env.prod
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+docker-compose.override.yml.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Grafana data
+observability/grafana/data/
+
+# Alembic local cache
+studio/db/migrations/__pycache__/

@@ -1,0 +1,122 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install lint tools
+        run: pip install ruff mypy
+      - name: Ruff lint
+        run: ruff check .
+      - name: Mypy type check
+        run: mypy studio/ cli/ --ignore-missing-imports
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: studio_test
+          POSTGRES_USER: studio
+          POSTGRES_PASSWORD: studio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -e ".[test]"
+      - name: Run migrations
+        env:
+          DATABASE_URL: postgresql+asyncpg://studio:studio@localhost:5432/studio_test
+        run: alembic upgrade head
+      - name: Run tests with coverage
+        env:
+          DATABASE_URL: postgresql+asyncpg://studio:studio@localhost:5432/studio_test
+          REDIS_URL: redis://localhost:6379/1
+          ENVIRONMENT: test
+        run: pytest --cov=studio --cov=cli --cov-report=xml -v
+      - name: Coverage gate (≥80%)
+        run: |
+          python -c "
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('coverage.xml')
+          rate = float(tree.getroot().attrib['line-rate'])
+          print(f'Coverage: {rate*100:.1f}%')
+          assert rate >= 0.80, f'Coverage {rate*100:.1f}% < 80%'
+          "
+
+  contract-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -e ".[test]"
+      - name: Run contract tests
+        run: pytest tests/contracts/ -v
+
+  build-images:
+    needs: [lint, test, contract-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -t studio-backend:ci .
+      - name: Build sandbox image
+        run: docker build -t studio-sandbox:ci ./sandbox
+
+  health-check:
+    needs: build-images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start stack
+        run: docker compose up -d --wait
+      - name: Health check
+        run: |
+          sleep 15
+          curl -f http://localhost:8000/health
+          curl -f http://localhost:8000/ready
+          curl -f http://localhost:8000/metrics
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
+
+  deploy-staging:
+    if: github.ref == 'refs/heads/main'
+    needs: health-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to staging
+        run: echo "TODO: deploy to staging (blue/green)"

@@ -35,7 +35,6 @@ async def design_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) -
     project_path = config.get("project_path", "/tmp/studio-projects/" + str(session_id))
 
     # Load pending friction items if this is a revision
-    trigger = state.get("current_loop", "design_build")
     pending_friction_ids = state.get("pending_friction_ids", [])
     friction_items: list[dict] = []
 
@@ -63,6 +62,10 @@ async def design_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) -
                     "friction_score": float(row.friction_score or 0),
                 })
     elif not state.get("design_digest"):
+        trigger = "initial"
+    elif state.get("current_loop") == "skeleton_fail":
+        trigger = "skeleton_fail"
+    else:
         trigger = "initial"
 
     agent_input = DesignAgentInput(

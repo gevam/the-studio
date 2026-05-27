@@ -103,6 +103,10 @@ async def run_design_agent(
     # 4. Parse JSON response → LivingDesign
     design = _parse_design(response.content)
 
+    # Track accumulated usage across initial call and optional retry
+    tokens_used = response.tokens_in + response.tokens_out
+    cost_usd = response.cost_usd
+
     # 5. If parse fails, retry once
     if design is None:
         retry_content = (
@@ -122,8 +126,9 @@ async def run_design_agent(
             session_id=input.session_id,
             db=db,
         )
+        tokens_used += retry_response.tokens_in + retry_response.tokens_out
+        cost_usd += retry_response.cost_usd
         design = _parse_design(retry_response.content)
-        response = retry_response  # use retry response for token counts
 
         if design is None:
             logger.error("design_agent_parse_failed", content_preview=response.content[:200])
@@ -220,8 +225,8 @@ async def run_design_agent(
         digest=digest,
         revision_reason=revision_reason,
         sections_changed=sections_changed,
-        tokens_used=response.tokens_in + response.tokens_out,
-        cost_usd=response.cost_usd,
+        tokens_used=tokens_used,
+        cost_usd=cost_usd,
     )
 
 

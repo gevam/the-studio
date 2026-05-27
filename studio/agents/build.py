@@ -221,9 +221,9 @@ async def run_build_agent(
         friction_tpl = prompt_loader.load("build_agent", "friction_detection")
         friction_prompt = prompt_loader.render(
             friction_tpl.content,
-            project_name=input.project_name,
+            project_path=input.project_path,
             design_digest=input.design_digest,
-            build_output=build_output[:2000],
+            files_built=build_output[:2000],
         )
         try:
             llm_response: LLMResponse = await llm.complete(
@@ -371,7 +371,7 @@ async def _detect_changed_files(project_path: str) -> list[FileChange]:
                 continue
             status = line[:2].strip()
             path = line[3:].strip()
-            if status in ("A", "?"):
+            if status in ("A", "??"):
                 action = "created"
             elif status == "D":
                 action = "deleted"

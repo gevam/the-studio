@@ -119,8 +119,9 @@ async def run_lint_check(sandbox: SandboxRunner, workdir: str) -> CheckResult:
 async def run_secrets_check(sandbox: SandboxRunner, workdir: str) -> CheckResult:
     """Grep for secrets/API keys in source code."""
     patterns = "|".join(_SECRET_PATTERNS)
+    escaped = patterns.replace("'", "'\\''")
     result = await sandbox.run(
-        f"grep -rEn '{patterns}' "
+        f"grep -rEn '{escaped}' "
         "--include='*.py' --include='*.js' --include='*.ts' "
         "--include='*.env' --include='*.yaml' --include='*.yml' "
         "--exclude-dir=.git --exclude-dir=node_modules --exclude-dir=venv "
@@ -142,8 +143,9 @@ async def run_secrets_check(sandbox: SandboxRunner, workdir: str) -> CheckResult
 async def run_pii_check(sandbox: SandboxRunner, workdir: str) -> CheckResult:
     """Grep for PII in log statements."""
     patterns = "|".join(_PII_LOG_PATTERNS)
+    escaped = patterns.replace("'", "'\\''")
     result = await sandbox.run(
-        f"grep -rEin '{patterns}' "
+        f"grep -rEin '{escaped}' "
         "--include='*.py' --include='*.js' --include='*.ts' "
         "--exclude-dir=.git --exclude-dir=node_modules --exclude-dir=venv "
         ". 2>/dev/null | head -20 || echo 'no_pii_in_logs'",

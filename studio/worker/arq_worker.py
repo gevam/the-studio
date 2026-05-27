@@ -41,10 +41,14 @@ async def run_session_graph(ctx: dict, session_id: str) -> dict:
     )
 
     # Load initial state from DB
-    sid = uuid.UUID(session_id)
-    async with AsyncSessionLocal() as db:
-        state = await project_state(sid, db)
-        await db.commit()
+    try:
+        sid = uuid.UUID(session_id)
+        async with AsyncSessionLocal() as db:
+            state = await project_state(sid, db)
+            await db.commit()
+    except Exception as exc:
+        logger.error("run_session_graph_init_error", session_id=session_id, error=str(exc))
+        return {"session_id": session_id, "status": "error", "error": str(exc)}
 
     # Run graph — each node opens its own DB session via the factory
     try:

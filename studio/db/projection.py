@@ -18,7 +18,7 @@ class SessionNotFound(Exception):
 
 async def project_state(session_id: uuid.UUID, db: AsyncSession) -> GraphState:
     """Build the thin GraphState from normalized DB tables."""
-    from studio.db.models import DesignFriction, DesignRevision, Session, Slice
+    from studio.db.models import DesignFriction, DesignRevision, EventLog, Session, Slice
 
     session = await db.get(Session, session_id)
     if session is None:
@@ -50,6 +50,15 @@ async def project_state(session_id: uuid.UUID, db: AsyncSession) -> GraphState:
     )
     remaining_slice_ids = [str(sid) for sid in remaining_result.scalars()]
 
+    # Derive skeleton_verified from whether skeleton.validated event was emitted
+    validated_result = await db.execute(
+        select(EventLog.id)
+        .where(EventLog.session_id == session_id)
+        .where(EventLog.event_type == "skeleton.validated")
+        .limit(1)
+    )
+    skeleton_verified = validated_result.scalar_one_or_none() is not None
+
     return GraphState(
         session_id=str(session_id),
         session_version=session.version,
@@ -67,8 +76,8 @@ async def project_state(session_id: uuid.UUID, db: AsyncSession) -> GraphState:
         cost_budget=float(session.cost_budget),
         pending_friction_ids=pending_friction_ids,
         remaining_slice_ids=remaining_slice_ids,
-        skeleton_verified=False,
-        verification_passed=False,
+        skeleton_verified=skeleton_verified,
+        verification_passed=skeleton_verified,
         awaiting_human=False,
         config=session.config or {},
         trace_id=session.trace_id,

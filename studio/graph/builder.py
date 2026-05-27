@@ -38,12 +38,14 @@ def build_sprint1_graph(
     def _inject(fn):
         async def wrapped(state: GraphState) -> dict:
             async with db_factory() as db:
-                return await fn(
+                result = await fn(
                     state,
                     db=db,
                     llm=llm,
                     prompt_loader=prompt_loader,
                 )
+                await db.commit()
+                return result
         wrapped.__name__ = fn.__name__
         return wrapped
 

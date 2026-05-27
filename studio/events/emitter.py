@@ -50,10 +50,12 @@ async def emit_event(
     # Lock the session row to serialize seq generation, then compute MAX.
     # FOR UPDATE on an aggregate is not allowed in PostgreSQL, so we hold
     # the session row lock instead and compute the aggregate separately.
-    await db.execute(
+    lock_result = await db.execute(
         text("SELECT id FROM sessions WHERE id = :sid FOR UPDATE"),
         {"sid": session_id},
     )
+    if lock_result.scalar_one_or_none() is None:
+        raise ValueError(f"Session {session_id} not found — cannot emit event")
     result = await db.execute(
         text(
             "SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq "

@@ -1,0 +1,327 @@
+{
+  "version": 8,
+  "content_hash": "",
+  "modules": [
+    {
+      "name": "models",
+      "responsibility": "Define the Todo domain entity as a plain @dataclass. No to_dict / from_dict methods — serialization belongs to the repository layer, not the domain. Entity fields are the sole source of truth for schema.",
+      "interfaces": [
+        "@dataclass class Todo: id: str; title: str; completed: bool; created_at: str"
+      ],
+      "dependencies": [],
+      "injection_points": []
+    },
+    {
+      "name": "repository",
+      "responsibility": "Define the TodoRepository Protocol and provide FileRepository (JSON-backed) and InMemoryRepository (for tests). Owns all dict<->Todo conversion using dataclasses.asdict() for writes and Todo(**data) for reads. No module outside repository touches serialization.",
+      "interfaces": [
+        "class TodoRepository(Protocol): def list(self) -> list[Todo]: ...; def add(self, todo: Todo) -> None: ...; def remove(self, id: str) -> None: ...; def update(self, todo: Todo) -> None: ...",
+        "class FileRepository(TodoRepository): __init__(self, path: Path) -> None",
+        "class InMemoryRepository(TodoRepository): __init__(self, todos: list[Todo] | None = None) -> None"
+      ],
+      "dependencies": [
+        "models"
+      ],
+      "injection_points": [
+        "TodoRepository is injected into TodoService; tests inject InMemoryRepository — no filesystem required"
+      ]
+    },
+    {
+      "name": "service",
+      "responsibility": "All business logic: add, list_all, complete, remove. Shared prefix-lookup extracted to _resolve_by_prefix(id_prefix) to eliminate duplication between complete() and remove(). Each public method has CC≤3.",
+      "interfaces": [
+        "class TodoService: def __init__(self, repo: TodoRepository) -> None: ...",
+        "def add(self, title: str) -> Todo: ...",
+        "def list_all(self) -> list[Todo]: ...",
+        "def complete(self, id_prefix: str) -> Todo: ...",
+        "def remove(self, id_prefix: str) -> Todo: ...",
+        "def _resolve_by_prefix(self, id_prefix: str) -> Todo: raises ValueError on 0 or >1 match"
+      ],
+      "dependencies": [
+        "models",
+        "repository"
+      ],
+      "injection_points": [
+        "TodoRepository injected at construction; tests pass InMemoryRepository"
+      ]
+    },
+    {
+      "name": "cli",
+      "responsibility": "Parse CLI arguments with argparse and delegate to per-command handler functions. main() is a thin dispatcher: build parser → parse args → call handler → return exit code. Each handler is a module-level function accepting (service, args) — independently testable without going through argparse. CC of main() ≤3.",
+      "interfaces": [
+        "def main(argv: list[str] | None = None, service: TodoService | None = None) -> int: ...",
+        "def _handle_add(service: TodoService, args: argparse.Namespace) -> None: ...",
+        "def _handle_list(service: TodoService, args: argparse.Namespace) -> None: ...",
+        "def _handle_complete(service: TodoService, args: argparse.Namespace) -> None: ...",
+        "def _handle_remove(service: TodoService, args: argparse.Namespace) -> None: ..."
+      ],
+      "dependencies": [
+        "service"
+      ],
+      "injection_points": [
+        "TodoService injected into main() for CLI-level integration tests without filesystem"
+      ]
+    },
+    {
+      "name": "config",
+      "responsibility": "Resolve the data file path from env var TODO_FILE or platform default (~/.todos.json). Single pure function, no side effects — tests override via env.",
+      "interfaces": [
+        "def get_data_path() -> Path: ..."
+      ],
+      "dependencies": [],
+      "injection_points": []
+    }
+  ],
+  "data_model": [
+    {
+      "name": "Todo",
+      "fields": [
+        {"name": "id", "type": "str", "note": "UUID4, generated at creation"},
+        {"name": "title", "type": "str", "note": "non-empty, max 256 chars"},
+        {"name": "completed", "type": "bool", "note": "default false"},
+        {"name": "created_at", "type": "str", "note": "ISO-8601 UTC timestamp"}
+      ],
+      "relationships": [],
+      "privacy_classification": "user_content"
+    },
+    {
+      "name": "TodoStore",
+      "fields": [
+        {"name": "version", "type": "int", "note": "schema version for future migration"},
+        {"name": "todos", "type": "list[dict]", "note": "serialized via dataclasses.asdict(); ordered by created_at"}
+      ],
+      "relationships": ["contains Todo[]"],
+      "privacy_classification": "user_content"
+    }
+  ],
+  "ux_flows": [
+    {
+      "name": "add_todo",
+      "steps": [
+        "User runs: todo add \"Buy milk\"",
+        "main() dispatches to _handle_add(service, args)",
+        "service.add(title) creates Todo and persists",
+        "Handler prints: Added [abc123] Buy milk"
+      ],
+      "entry_point": "todo add <title>",
+      "success_criteria": "Todo appears in list output immediately after add",
+      "error_states": [
+        "Empty title → stderr: title cannot be empty, exit 1",
+        "File write fails → stderr: could not save todos, exit 1"
+      ],
+      "i18n_considerations": []
+    },
+    {
+      "name": "list_todos",
+      "steps": [
+        "User runs: todo list",
+        "main() dispatches to _handle_list(service, args)",
+        "service.list_all() returns todos from repository",
+        "Handler renders: [ ] abc123  Buy milk  (created 2026-05-28)"
+      ],
+      "entry_point": "todo list",
+      "success_criteria": "All todos shown with id, status, title, date in ≤1s",
+      "error_states": [
+        "No todos → prints: No todos yet",
+        "File read fails → stderr: could not load todos, exit 1"
+      ],
+      "i18n_considerations": []
+    },
+    {
+      "name": "complete_todo",
+      "steps": [
+        "User runs: todo complete abc123",
+        "main() dispatches to _handle_complete(service, args)",
+        "service.complete(id_prefix) calls _resolve_by_prefix, sets completed=True, persists",
+        "Handler prints: Done [abc123] Buy milk"
+      ],
+      "entry_point": "todo complete <id>",
+      "success_criteria": "Todo shows [x] in subsequent list",
+      "error_states": [
+        "ID not found → stderr: no todo with id abc123, exit 1",
+        "Ambiguous prefix → stderr: prefix matches N todos, be more specific, exit 1"
+      ],
+      "i18n_considerations": []
+    },
+    {
+      "name": "remove_todo",
+      "steps": [
+        "User runs: todo remove abc123",
+        "main() dispatches to _handle_remove(service, args)",
+        "service.remove(id_prefix) calls _resolve_by_prefix, deletes from repository",
+        "Handler prints: Removed [abc123] Buy milk"
+      ],
+      "entry_point": "todo remove <id>",
+      "success_criteria": "Todo absent from subsequent list",
+      "error_states": [
+        "ID not found → stderr: no todo with id abc123, exit 1"
+      ],
+      "i18n_considerations": []
+    }
+  ],
+  "customer_journey": "The user installs the package (pip install todo-cli), runs 'todo add \"task\"' to capture something fast, 'todo list' to review, 'todo complete <id>' when done, 'todo remove <id>' to clean up. Todos survive across shell sessions because they persist to ~/.todos.json. The entire task lifecycle takes ≤3 commands. No config needed for basic use.",
+  "experience_metric": {
+    "name": "task_lifecycle_in_3_commands",
+    "target": "Add, complete, and remove a todo in ≤3 commands, each completing in ≤0.5s on a laptop",
+    "measurement": "Time each CLI invocation; verify file persists between process restarts"
+  },
+  "architecture_decisions": [
+    {
+      "id": "ADR-001",
+      "title": "Repository Protocol for storage abstraction",
+      "context": "Sprint-1 benchmark showed 0% test coverage. All I/O was inline in business logic, making unit testing impossible without patching the filesystem.",
+      "decision": "Define a TodoRepository Protocol. FileRepository is the production implementation. Tests inject an InMemoryRepository — no mocking required.",
+      "rationale": "Protocols over ABC: lighter, structural, no inheritance needed. Eliminates all mock/patch usage in tests.",
+      "consequences": [
+        "Cyclomatic complexity of service methods drops because each method does one thing",
+        "Tests run without touching the filesystem — fast and deterministic",
+        "Adding a SQLite or cloud backend is a new Repository class, not a service change"
+      ],
+      "status": "accepted",
+      "date": "2026-05-28T00:00:00"
+    },
+    {
+      "id": "ADR-002",
+      "title": "JSON file as persistence format with schema versioning",
+      "context": "todo-cli is a trivial complexity project. A database adds infra dependency that exceeds the complexity budget.",
+      "decision": "Persist as JSON: {\"version\": 1, \"todos\": [...]}. Version field enables future migration without breaking existing files.",
+      "rationale": "Human-readable, no dependencies, trivially testable with temp files.",
+      "consequences": [
+        "Not suitable for concurrent writes from multiple processes — accepted for single-user CLI",
+        "Migration logic lives in FileRepository, not in models"
+      ],
+      "status": "accepted",
+      "date": "2026-05-28T00:00:00"
+    },
+    {
+      "id": "ADR-003",
+      "title": "CLI injectability for integration testing",
+      "context": "Sprint-1 found 0 tests passing. The CLI called service directly without any seam for testing.",
+      "decision": "main() accepts optional service: TodoService parameter. When None, it constructs the real service with FileRepository. Integration tests pass a service backed by InMemoryRepository.",
+      "rationale": "Keeps CLI testable without filesystem while keeping the default path zero-config for end users.",
+      "consequences": [
+        "main() signature has an optional parameter — callers not passing it are unaffected"
+      ],
+      "status": "accepted",
+      "date": "2026-05-28T00:00:00"
+    },
+    {
+      "id": "ADR-004",
+      "title": "Drop Serializable Protocol — repository owns serialization",
+      "context": "Friction 75f7d625: 10 duplicate code blocks detected in models.py. The Serializable Protocol (to_dict / from_dict) forces every domain entity to manually implement boilerplate serialization, duplicating 6+ lines per entity. The protocol lives in the domain layer but serialization is an infrastructure concern.",
+      "decision": "Remove the Serializable Protocol entirely. The repository layer uses dataclasses.asdict() for writes and Todo(**data) for reads. Models are pure @dataclass with no serialization methods.",
+      "rationale": "Domain entities should express business invariants (field names, types, constraints), not serialization format. The repository already controls the file format — it is the natural owner of dict<->entity conversion. dataclasses.asdict() is stdlib, zero boilerplate, and works for all future entities without any per-class code.",
+      "consequences": [
+        "All serialization is co-located in repository.py — one place to update if the format changes",
+        "New entities require no to_dict / from_dict implementation — boilerplate duplication eliminated",
+        "models.py has no imports from infrastructure — cleaner domain boundary"
+      ],
+      "status": "accepted",
+      "date": "2026-05-28T00:00:00"
+    },
+    {
+      "id": "ADR-005",
+      "title": "CLI command handler decomposition — handlers as named functions",
+      "context": "Friction b6d8fba6: cli.main() has CC ~10 and spans 56 lines. All four command branches, three try/except blocks, and output formatting are inlined in a single function, making individual commands impossible to test without going through argparse. The design only specified main() — it did not mandate handler decomposition, so Build agent inlined everything.",
+      "decision": "The cli module interface must expose four module-level handler functions: _handle_add, _handle_list, _handle_complete, _handle_remove. Each accepts (service: TodoService, args: argparse.Namespace) -> None. main() becomes a thin dispatcher: build parser, parse args, call handler. CC of main() ≤3; CC of each handler ≤3.",
+      "rationale": "Named handlers are independently testable without argparse: call _handle_add(service, Namespace(title='x')) directly in a test. Decomposition enforced at the design level guarantees the Build agent cannot produce a monolithic main(). Each handler has a single responsibility: call one service method and format one output line.",
+      "consequences": [
+        "main() drops from 56 lines to ≤15 lines",
+        "Each command can be unit-tested with a mock service and a Namespace, no subprocess or argparse.parse_args required",
+        "Adding a new command means adding a new handler function — not modifying the dispatcher body"
+      ],
+      "status": "accepted",
+      "date": "2026-05-28T00:00:00"
+    },
+    {
+      "id": "ADR-006",
+      "title": "Service prefix-resolution extracted to _resolve_by_prefix helper",
+      "context": "Friction 9f7f1aa2: complete() and remove() share an identical 5-line prefix-resolution block (list todos, filter by startswith, raise on 0 matches, raise on N>1 matches, extract matches[0]). The only difference is the action after resolution. The design v4 did not name this shared logic, so Build agent duplicated it.",
+      "decision": "The service module interface explicitly includes _resolve_by_prefix(self, id_prefix: str) -> Todo as a named private method. It raises ValueError on zero matches (no todo with id {id_prefix}) and on multiple matches (prefix matches {n} todos, be more specific). complete() and remove() call _resolve_by_prefix and then perform their distinct action.",
+      "rationale": "Naming the shared behavior at the design level guarantees the Build agent extracts it. The helper has a single invariant to maintain (the error semantics of prefix lookup) — centralizing it means a future change to error messaging or match logic is a one-line edit.",
+      "consequences": [
+        "Duplication in service.py eliminated",
+        "_resolve_by_prefix is independently testable: verify correct ValueError on 0 and N>1 matches",
+        "complete() and remove() each reduce to 2 lines of action code after resolution"
+      ],
+      "status": "accepted",
+      "date": "2026-05-28T00:00:00"
+    }
+  ],
+  "threat_model": [
+    {
+      "threat_type": "T",
+      "description": "Malicious todo title containing shell metacharacters if title ever passed to subprocess",
+      "component": "cli",
+      "mitigation": "Never pass todo content to subprocess. Output is formatted via f-strings to terminal only.",
+      "status": "mitigated"
+    },
+    {
+      "threat_type": "I",
+      "description": "Another process modifying ~/.todos.json between read and write (TOCTOU)",
+      "component": "repository",
+      "mitigation": "Accepted risk for single-user CLI. Concurrent writes from two processes may lose data.",
+      "status": "accepted"
+    },
+    {
+      "threat_type": "I",
+      "description": "Corrupted JSON file causes unhandled crash on startup",
+      "component": "repository",
+      "mitigation": "FileRepository wraps json.load in try/except; on parse failure backs up the file and starts fresh with an empty store.",
+      "status": "mitigated"
+    }
+  ],
+  "privacy_inventory": [
+    {
+      "data_element": "todo titles",
+      "classification": "user_content",
+      "purpose": "User task tracking",
+      "retention": "Until user removes the todo or deletes the file",
+      "encryption": "At rest: none (plaintext in ~/.todos.json). At transit: N/A — local only.",
+      "erasure_path": "todo remove <id> or delete ~/.todos.json"
+    }
+  ],
+  "i18n_plan": {
+    "framework": "none for Sprint 1",
+    "locales": ["en"],
+    "rtl_strategy": "N/A — CLI output only",
+    "note": "All user-visible strings are in handler functions in cli.py. Extract to a strings dict if i18n becomes required."
+  },
+  "open_questions": [
+    "Should completed todos be hidden from list by default, or shown with a strikethrough style?",
+    "Should todo remove require confirmation for incomplete todos?"
+  ],
+  "known_friction": [],
+  "sections": [
+    {
+      "id": "modules",
+      "title": "Module Boundaries",
+      "content": "5 modules: models (plain @dataclass, no serialization), repository (TodoRepository Protocol + FileRepository using dataclasses.asdict() + InMemoryRepository), service (business logic + _resolve_by_prefix helper, injected repo), cli (main() dispatcher + 4 named handler functions, injected service), config (data path resolution).",
+      "content_hash": ""
+    },
+    {
+      "id": "data_model",
+      "title": "Data Model",
+      "content": "Todo: id (UUID4), title (str ≤256), completed (bool), created_at (ISO UTC). Persisted as JSON {version, todos[]}. Serialization lives in repository via dataclasses.asdict().",
+      "content_hash": ""
+    },
+    {
+      "id": "ux_flows",
+      "title": "UX Flows",
+      "content": "4 flows: add_todo, list_todos, complete_todo, remove_todo. Each ≤4 steps. All dispatch through named CLI handler functions. Error states are explicit.",
+      "content_hash": ""
+    },
+    {
+      "id": "adrs",
+      "title": "Architecture Decisions",
+      "content": "6 ADRs accepted: ADR-001 TodoRepository Protocol, ADR-002 JSON persistence with versioning, ADR-003 CLI main() injectable service, ADR-004 Drop Serializable Protocol (serialization→repository), ADR-005 CLI handler decomposition (main CC≤3), ADR-006 _resolve_by_prefix service helper.",
+      "content_hash": ""
+    },
+    {
+      "id": "threat_model",
+      "title": "Threat Model",
+      "content": "3 STRIDE entries: T (shell injection — mitigated), I (TOCTOU — accepted), I (corrupt JSON — mitigated).",
+      "content_hash": ""
+    }
+  ]
+}

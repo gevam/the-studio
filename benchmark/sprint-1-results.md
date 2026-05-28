@@ -7,15 +7,15 @@
 
 | Metric | Baseline (plain Claude) | Studio |
 |--------|------------------------|--------|
-| Duration | 35.2s | 876.9s |
-| Cost | $0.0995 | $0.0000 |
+| Duration | 31.9s | 1358.5s |
+| Cost | $0.1092 | $2.3342 |
 | Test coverage | 0.0% | 0.0% |
-| Cyclomatic complexity | 7.0 | 13.0 |
+| Cyclomatic complexity | 7.0 | 18.0 |
 | Coupling score | 0.0 | 0.0 |
-| Duplication % | 28.2% | 19.8% |
-| Friction items found | 2 | 5 |
-| Friction items resolved | 0 | 0 |
-| Design revisions | 0 | 1 |
+| Duplication % | 28.2% | 22.3% |
+| Friction items found | 2 | 16 |
+| Friction items resolved | 0 | 10 |
+| Design revisions | 0 | 3 |
 
 ## Studio wins
 - duplication
@@ -27,4 +27,4 @@
 ## Errors
 
 Baseline: none
-Studio: Claude CLI timed out after 600s
+Studio: Max iterations reached without verified skeleton

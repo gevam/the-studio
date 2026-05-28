@@ -98,6 +98,7 @@ async def run_design_agent(
         prompt_hash=prompt_hash,
         session_id=input.session_id,
         db=db,
+        prefill="{",
     )
 
     # 4. Parse JSON response → LivingDesign
@@ -125,6 +126,7 @@ async def run_design_agent(
             prompt_hash=prompt_hash,
             session_id=input.session_id,
             db=db,
+            prefill="{",
         )
         tokens_used += retry_response.tokens_in + retry_response.tokens_out
         cost_usd += retry_response.cost_usd
@@ -233,12 +235,15 @@ async def run_design_agent(
 def _parse_design(content: str) -> Optional[LivingDesign]:
     """Attempt to parse LLM output as LivingDesign. Returns None on failure.
 
-    Handles two formats:
-    1. Direct LivingDesign JSON (initial design mode)
-    2. Friction revision wrapper: {"revised_design": {...}, "revision_summary": {...}}
+    Handles:
+    1. Direct LivingDesign JSON
+    2. Friction revision wrapper: {"revised_design": {...}, ...}
+    3. Markdown-fenced JSON (```json ... ```)
+    4. JSON embedded after prose preamble (scan for first '{')
     """
-    # Strip markdown fences if present
     text = content.strip()
+
+    # Strip markdown fences
     if text.startswith("```"):
         lines = text.split("\n")
         start = 1
@@ -247,14 +252,29 @@ def _parse_design(content: str) -> Optional[LivingDesign]:
             if lines[i].strip() == "```":
                 end = i
                 break
-        text = "\n".join(lines[start:end])
+        text = "\n".join(lines[start:end]).strip()
 
-    try:
-        data = json.loads(text)
-        # Check if it's the friction revision wrapper
+    # Try every '{' position as a potential JSON start (handles prose preamble
+    # and prefill-prepended '{' that doesn't belong to the actual JSON object)
+    idx = 0
+    while True:
+        brace_idx = text.find("{", idx)
+        if brace_idx == -1:
+            break
+        candidate = text[brace_idx:]
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            idx = brace_idx + 1
+            continue
+        # JSON parsed — this is our candidate object. Unwrap and validate.
         if isinstance(data, dict) and "revised_design" in data:
             data = data["revised_design"]
-        return LivingDesign(**data)
-    except (json.JSONDecodeError, Exception) as exc:
-        logger.warning("design_parse_failed", error=str(exc)[:200])
-        return None
+        try:
+            return LivingDesign(**data)
+        except Exception as exc:
+            logger.warning("design_parse_schema_error", error=str(exc)[:200])
+            return None
+
+    logger.warning("design_parse_failed", error="no valid JSON object found in response")
+    return None

@@ -58,6 +58,7 @@ class LLMProvider(Protocol):
         max_tokens: int,
         temperature: float,
         model: str,
+        prefill: str = "",
     ) -> LLMResponse: ...
 
 
@@ -86,8 +87,13 @@ class AnthropicProvider:
         max_tokens: int,
         temperature: float,
         model: str,
+        prefill: str = "",
     ) -> LLMResponse:
         from anthropic import AsyncAnthropic  # type: ignore[import]
+
+        msgs = list(messages)
+        if prefill:
+            msgs = msgs + [{"role": "assistant", "content": prefill}]
 
         start = time.monotonic()
         response = await self._client.messages.create(
@@ -101,11 +107,13 @@ class AnthropicProvider:
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
-            messages=messages,
+            messages=msgs,
         )
         latency_ms = int((time.monotonic() - start) * 1000)
 
         content = response.content[0].text if response.content else ""
+        if prefill:
+            content = prefill + content
         tokens_in = response.usage.input_tokens
         tokens_out = response.usage.output_tokens
         cost = _compute_cost(model, tokens_in, tokens_out)
@@ -159,6 +167,7 @@ class ClaudeCLIProvider:
         max_tokens: int,
         temperature: float,
         model: str,
+        prefill: str = "",
     ) -> LLMResponse:
         # Build a single prompt string: system + user turns concatenated
         prompt_parts: list[str] = []
@@ -174,6 +183,9 @@ class ClaudeCLIProvider:
                     for block in content
                 )
             prompt_parts.append(f"<{role}>\n{content}\n</{role}>")
+        if prefill:
+            # Open the assistant turn without closing it so CLI continues from prefill
+            prompt_parts.append(f"<assistant>\n{prefill}")
 
         full_prompt = "\n\n".join(prompt_parts)
 
@@ -192,10 +204,10 @@ class ClaudeCLIProvider:
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input=full_prompt.encode()), timeout=600
+                proc.communicate(input=full_prompt.encode()), timeout=900
             )
         except asyncio.TimeoutError:
-            raise RuntimeError("Claude CLI timed out after 600s")
+            raise RuntimeError("Claude CLI timed out after 900s")
         except FileNotFoundError:
             raise RuntimeError(
                 f"Claude CLI not found at {self._cli_path}. "
@@ -215,6 +227,8 @@ class ClaudeCLIProvider:
             raise RuntimeError(f"Claude CLI returned invalid JSON: {exc}\nRaw: {raw[:500]}")
 
         content = parsed.get("result", "")
+        if prefill:
+            content = prefill + content
         cost_usd = float(parsed.get("total_cost_usd", 0.0))
 
         usage = parsed.get("usage", {})
@@ -264,6 +278,7 @@ class LLMClient:
         prompt_hash: str = "",
         session_id: Optional[uuid.UUID] = None,
         db=None,  # AsyncSession | None
+        prefill: str = "",
     ) -> LLMResponse:
         """Call the LLM, record metrics and events."""
         from studio.observability.metrics import llm_calls_total, llm_latency_seconds
@@ -278,6 +293,7 @@ class LLMClient:
             max_tokens=max_tokens,
             temperature=temperature,
             model=model,
+            prefill=prefill,
         )
 
         llm_latency_seconds.labels(agent=agent, model=model).observe(

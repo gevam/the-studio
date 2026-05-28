@@ -18,7 +18,8 @@ def skeleton_verify_router(state: GraphState) -> str:
 
 def build_friction_router(state: GraphState) -> str:
     """After skeleton build: friction pending → design_agent, clean → skeleton_verify."""
+    max_iterations = (state.get("config") or {}).get("max_design_iterations", 5)
     pending = state.get("pending_friction_ids", [])
-    if pending:
+    if pending and state.get("iteration", 0) < max_iterations:
         return "design_agent"
     return "skeleton_verify"

@@ -56,6 +56,10 @@ async def run_design_agent(
     from studio.events.emitter import emit_event
     from studio.observability.metrics import design_revisions_total
 
+    # Design agent always uses the Anthropic SDK so that assistant prefill
+    # works correctly and there is no prose preamble before the JSON.
+    design_llm = LLMClient(provider="anthropic")
+
     # 1. Load system prompt
     system_tpl = prompt_loader.load("design_agent", "system")
 
@@ -88,7 +92,7 @@ async def run_design_agent(
     prompt_hash = task_tpl.hash
 
     # 3. Call LLM
-    response: LLMResponse = await llm.complete(
+    response: LLMResponse = await design_llm.complete(
         agent="design_agent",
         system_prompt=system_tpl.content,
         user_content=user_content,
@@ -116,7 +120,7 @@ async def run_design_agent(
             "No markdown fences, no explanation — raw JSON only.\n\n"
             f"Previous response (first 500 chars):\n{response.content[:500]}"
         )
-        retry_response: LLMResponse = await llm.complete(
+        retry_response: LLMResponse = await design_llm.complete(
             agent="design_agent",
             system_prompt=system_tpl.content,
             user_content=retry_content,

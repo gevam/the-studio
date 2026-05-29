@@ -10,5 +10,6 @@ services:
   worker:
     volumes:
       - .:/app
+      - /home/geva/.local/share/claude/versions/2.1.153:/home/geva/.local/bin/claude:ro
     environment:
       - LOG_LEVEL=DEBUG

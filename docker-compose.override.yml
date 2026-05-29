@@ -15,3 +15,4 @@ services:
       - /home/geva/.claude.json:/home/geva/.claude.json:ro
     environment:
       - LOG_LEVEL=DEBUG
+      - HOME=/home/geva

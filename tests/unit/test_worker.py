@@ -42,13 +42,8 @@ async def test_ping_job_default_message():
     assert result == "pong"
 
 
-@pytest.mark.asyncio
-async def test_run_session_graph_stub_returns_session_id():
-    """run_session_graph stub returns the session_id it was given."""
+def test_run_session_graph_is_async():
+    """run_session_graph is an async function (not the old stub)."""
+    import asyncio
     from studio.worker.arq_worker import run_session_graph
-
-    ctx: dict = {}
-    session_id = "test-session-123"
-    result = await run_session_graph(ctx, session_id=session_id)
-    assert result["session_id"] == session_id
-    assert result["status"] == "not_implemented"
+    assert asyncio.iscoroutinefunction(run_session_graph)

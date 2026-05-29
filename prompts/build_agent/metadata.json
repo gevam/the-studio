@@ -1,0 +1,9 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-05-27",
+  "prompts": {
+    "system": {"file": "system.md", "max_tokens": 1500},
+    "skeleton": {"file": "skeleton.md"},
+    "friction_detection": {"file": "friction_detection.md"}
+  }
+}

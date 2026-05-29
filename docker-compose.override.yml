@@ -11,5 +11,7 @@ services:
     volumes:
       - .:/app
       - /home/geva/.local/share/claude/versions/2.1.153:/home/geva/.local/bin/claude:ro
+      - /home/geva/.claude:/home/geva/.claude
+      - /home/geva/.claude.json:/home/geva/.claude.json:ro
     environment:
       - LOG_LEVEL=DEBUG

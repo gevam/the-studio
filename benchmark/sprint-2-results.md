@@ -7,14 +7,14 @@
 
 | Metric | Baseline (plain Claude) | Studio |
 |--------|------------------------|--------|
-| Duration | 47.6s | 6681.5s |
-| Cost | $0.2261 | $0.0000 |
+| Duration | 44.7s | 3482.4s |
+| Cost | $0.2183 | $11.4417 |
 | Test coverage | 0.0% | 95.0% |
 | Cyclomatic complexity | 7.0 | 3.0 |
 | Duplication % | 33.0% | 31.9% |
-| Friction items found | 1 | 34 |
-| Friction items resolved | 0 | 33 |
-| Design revisions | 0 | 22 |
+| Friction items found | 1 | 20 |
+| Friction items resolved | 0 | 18 |
+| Design revisions | 0 | 7 |
 
 ## Studio wins
 - coverage
@@ -24,13 +24,12 @@
 - design_feedback_loop
 
 ## Errors
-Studio: Recursion limit of 120 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
-For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+Studio: none
 
 ## Event log (DoD proof — three loops + both human gates)
 
 ```
-session_id = 737e509b-ee53-418c-8a6c-fe847246b499
+session_id = 4250338e-b617-4f1a-9f3e-dfcae03213ff
 
 seq | event_type
 --- | ----------
@@ -70,490 +69,229 @@ seq | event_type
  34 | agent.llm_response
  35 | ai.feedback_recorded
  36 | design_friction.reported
- 37 | git.committed
- 38 | agent.completed
- 39 | slice.built
- 40 | verification.result
- 41 | slice.verified
- 42 | skeleton.validated
- 43 | human.checkpoint
- 44 | human.decision
- 45 | agent.started
- 46 | agent.llm_call
- 47 | agent.llm_response
- 48 | ai.feedback_recorded
- 49 | agent.completed
- 50 | agent.started
- 51 | agent.llm_call
- 52 | agent.llm_response
- 53 | ai.feedback_recorded
- 54 | design_friction.reported
- 55 | agent.completed
- 56 | agent.started
- 57 | agent.llm_call
- 58 | agent.llm_response
- 59 | ai.feedback_recorded
- 60 | design.revised
- 61 | agent.started
- 62 | agent.llm_call
- 63 | agent.llm_response
- 64 | ai.feedback_recorded
- 65 | design_friction.reported
- 66 | git.committed
- 67 | agent.completed
- 68 | verification.result
- 69 | agent.started
- 70 | agent.llm_call
- 71 | agent.llm_response
- 72 | ai.feedback_recorded
- 73 | agent.completed
- 74 | agent.started
- 75 | agent.llm_call
- 76 | agent.llm_response
- 77 | ai.feedback_recorded
- 78 | reviewer.evaluated
- 79 | agent.completed
- 80 | agent.started
- 81 | agent.llm_call
- 82 | agent.llm_response
- 83 | ai.feedback_recorded
- 84 | design_friction.reported
- 85 | design_friction.reported
- 86 | design_friction.reported
- 87 | agent.completed
- 88 | verification.result
- 89 | agent.started
- 90 | agent.llm_call
- 91 | agent.llm_response
- 92 | ai.feedback_recorded
- 93 | agent.completed
- 94 | agent.started
- 95 | agent.llm_call
- 96 | agent.llm_response
- 97 | ai.feedback_recorded
- 98 | design.revised
- 99 | agent.started
-100 | agent.llm_call
-101 | agent.llm_response
-102 | ai.feedback_recorded
-103 | design_friction.reported
-104 | agent.completed
-105 | verification.result
-106 | agent.started
-107 | agent.llm_call
-108 | agent.llm_response
-109 | ai.feedback_recorded
-110 | agent.completed
-111 | agent.started
-112 | agent.llm_call
-113 | agent.llm_response
-114 | ai.feedback_recorded
-115 | reviewer.evaluated
-116 | agent.completed
-117 | agent.started
-118 | agent.llm_call
-119 | agent.llm_response
-120 | ai.feedback_recorded
-121 | design_friction.reported
-122 | agent.completed
-123 | verification.result
-124 | agent.started
-125 | agent.llm_call
-126 | agent.llm_response
-127 | ai.feedback_recorded
-128 | agent.completed
-129 | agent.started
-130 | agent.llm_call
-131 | agent.llm_response
-132 | ai.feedback_recorded
-133 | design.revised
-134 | agent.started
-135 | agent.llm_call
-136 | agent.llm_response
-137 | ai.feedback_recorded
-138 | design_friction.reported
-139 | agent.completed
-140 | verification.result
-141 | agent.started
-142 | agent.llm_call
-143 | agent.llm_response
-144 | ai.feedback_recorded
-145 | agent.completed
-146 | agent.started
-147 | agent.llm_call
-148 | agent.llm_response
-149 | ai.feedback_recorded
-150 | reviewer.evaluated
+ 37 | agent.completed
+ 38 | slice.built
+ 39 | verification.result
+ 40 | slice.verified
+ 41 | skeleton.validated
+ 42 | human.checkpoint
+ 43 | human.decision
+ 44 | agent.started
+ 45 | agent.llm_call
+ 46 | agent.llm_response
+ 47 | ai.feedback_recorded
+ 48 | agent.completed
+ 49 | agent.started
+ 50 | agent.llm_call
+ 51 | agent.llm_response
+ 52 | ai.feedback_recorded
+ 53 | design_friction.reported
+ 54 | agent.completed
+ 55 | agent.started
+ 56 | agent.llm_call
+ 57 | agent.llm_response
+ 58 | ai.feedback_recorded
+ 59 | design.revised
+ 60 | agent.started
+ 61 | agent.llm_call
+ 62 | agent.llm_response
+ 63 | ai.feedback_recorded
+ 64 | design_friction.reported
+ 65 | agent.completed
+ 66 | verification.result
+ 67 | agent.started
+ 68 | agent.llm_call
+ 69 | agent.llm_response
+ 70 | ai.feedback_recorded
+ 71 | agent.completed
+ 72 | agent.started
+ 73 | agent.llm_call
+ 74 | agent.llm_response
+ 75 | ai.feedback_recorded
+ 76 | reviewer.evaluated
+ 77 | agent.completed
+ 78 | agent.started
+ 79 | agent.llm_call
+ 80 | agent.llm_response
+ 81 | ai.feedback_recorded
+ 82 | design_friction.reported
+ 83 | agent.completed
+ 84 | verification.result
+ 85 | agent.started
+ 86 | agent.llm_call
+ 87 | agent.llm_response
+ 88 | ai.feedback_recorded
+ 89 | agent.completed
+ 90 | agent.started
+ 91 | agent.llm_call
+ 92 | agent.llm_response
+ 93 | ai.feedback_recorded
+ 94 | reviewer.evaluated
+ 95 | agent.completed
+ 96 | agent.started
+ 97 | agent.llm_call
+ 98 | agent.llm_response
+ 99 | ai.feedback_recorded
+100 | design_friction.reported
+101 | agent.completed
+102 | agent.started
+103 | agent.llm_call
+104 | agent.llm_response
+105 | ai.feedback_recorded
+106 | design.revised
+107 | agent.started
+108 | agent.llm_call
+109 | agent.llm_response
+110 | ai.feedback_recorded
+111 | design_friction.reported
+112 | agent.completed
+113 | verification.result
+114 | agent.started
+115 | agent.llm_call
+116 | agent.llm_response
+117 | ai.feedback_recorded
+118 | agent.completed
+119 | agent.started
+120 | agent.llm_call
+121 | agent.llm_response
+122 | ai.feedback_recorded
+123 | reviewer.evaluated
+124 | agent.completed
+125 | agent.started
+126 | agent.llm_call
+127 | agent.llm_response
+128 | ai.feedback_recorded
+129 | design_friction.reported
+130 | agent.completed
+131 | verification.result
+132 | agent.started
+133 | agent.llm_call
+134 | agent.llm_response
+135 | ai.feedback_recorded
+136 | agent.completed
+137 | agent.started
+138 | agent.llm_call
+139 | agent.llm_response
+140 | ai.feedback_recorded
+141 | reviewer.evaluated
+142 | agent.completed
+143 | agent.started
+144 | agent.llm_call
+145 | agent.llm_response
+146 | ai.feedback_recorded
+147 | design_friction.reported
+148 | design_friction.reported
+149 | design_friction.reported
+150 | design_friction.reported
 151 | agent.completed
 152 | agent.started
 153 | agent.llm_call
 154 | agent.llm_response
 155 | ai.feedback_recorded
-156 | design_friction.reported
-157 | agent.completed
-158 | verification.result
-159 | agent.started
-160 | agent.llm_call
-161 | agent.llm_response
-162 | ai.feedback_recorded
-163 | agent.completed
+156 | design.revised
+157 | agent.started
+158 | agent.llm_call
+159 | agent.llm_response
+160 | ai.feedback_recorded
+161 | design_friction.reported
+162 | agent.completed
+163 | verification.result
 164 | agent.started
 165 | agent.llm_call
 166 | agent.llm_response
 167 | ai.feedback_recorded
-168 | design.revised
+168 | agent.completed
 169 | agent.started
 170 | agent.llm_call
 171 | agent.llm_response
 172 | ai.feedback_recorded
-173 | design_friction.reported
+173 | reviewer.evaluated
 174 | agent.completed
-175 | verification.result
-176 | agent.started
-177 | agent.llm_call
-178 | agent.llm_response
-179 | ai.feedback_recorded
+175 | agent.started
+176 | agent.llm_call
+177 | agent.llm_response
+178 | ai.feedback_recorded
+179 | design_friction.reported
 180 | agent.completed
-181 | agent.started
-182 | agent.llm_call
-183 | agent.llm_response
-184 | ai.feedback_recorded
-185 | design.revised
-186 | agent.started
-187 | agent.llm_call
-188 | agent.llm_response
-189 | ai.feedback_recorded
-190 | design_friction.reported
-191 | agent.completed
-192 | verification.result
+181 | verification.result
+182 | agent.started
+183 | agent.llm_call
+184 | agent.llm_response
+185 | ai.feedback_recorded
+186 | agent.completed
+187 | agent.started
+188 | agent.llm_call
+189 | agent.llm_response
+190 | ai.feedback_recorded
+191 | reviewer.evaluated
+192 | agent.completed
 193 | agent.started
 194 | agent.llm_call
 195 | agent.llm_response
 196 | ai.feedback_recorded
-197 | agent.completed
-198 | agent.started
-199 | agent.llm_call
-200 | agent.llm_response
-201 | ai.feedback_recorded
-202 | design.revised
-203 | agent.started
-204 | agent.llm_call
-205 | agent.llm_response
-206 | ai.feedback_recorded
-207 | design_friction.reported
-208 | agent.completed
-209 | verification.result
-210 | agent.started
-211 | agent.llm_call
-212 | agent.llm_response
-213 | ai.feedback_recorded
-214 | agent.completed
-215 | agent.started
-216 | agent.llm_call
-217 | agent.llm_response
-218 | ai.feedback_recorded
-219 | design.revised
-220 | agent.started
-221 | agent.llm_call
-222 | agent.llm_response
-223 | ai.feedback_recorded
-224 | design_friction.reported
-225 | agent.completed
-226 | verification.result
-227 | agent.started
-228 | agent.llm_call
-229 | agent.llm_response
-230 | ai.feedback_recorded
-231 | agent.completed
-232 | agent.started
-233 | agent.llm_call
-234 | agent.llm_response
-235 | ai.feedback_recorded
-236 | reviewer.evaluated
-237 | agent.completed
-238 | agent.started
-239 | agent.llm_call
-240 | agent.llm_response
-241 | ai.feedback_recorded
-242 | design_friction.reported
-243 | agent.completed
-244 | verification.result
-245 | agent.started
-246 | agent.llm_call
-247 | agent.llm_response
-248 | ai.feedback_recorded
-249 | agent.completed
-250 | agent.started
-251 | agent.llm_call
-252 | agent.llm_response
-253 | ai.feedback_recorded
-254 | design.revised
-255 | agent.started
-256 | agent.llm_call
-257 | agent.llm_response
-258 | ai.feedback_recorded
-259 | design_friction.reported
-260 | agent.completed
-261 | verification.result
-262 | agent.started
-263 | agent.llm_call
-264 | agent.llm_response
-265 | ai.feedback_recorded
-266 | agent.completed
-267 | agent.started
-268 | agent.llm_call
-269 | agent.llm_response
-270 | ai.feedback_recorded
-271 | reviewer.evaluated
-272 | agent.completed
-273 | agent.started
-274 | agent.llm_call
-275 | agent.llm_response
-276 | ai.feedback_recorded
-277 | design_friction.reported
-278 | agent.completed
-279 | verification.result
-280 | agent.started
-281 | agent.llm_call
-282 | agent.llm_response
-283 | ai.feedback_recorded
-284 | agent.completed
-285 | agent.started
-286 | agent.llm_call
-287 | agent.llm_response
-288 | ai.feedback_recorded
-289 | design.revised
-290 | agent.started
-291 | agent.llm_call
-292 | agent.llm_response
-293 | ai.feedback_recorded
-294 | design_friction.reported
-295 | agent.completed
-296 | verification.result
-297 | agent.started
-298 | agent.llm_call
-299 | agent.llm_response
-300 | ai.feedback_recorded
-301 | agent.completed
-302 | agent.started
-303 | agent.llm_call
-304 | agent.llm_response
-305 | ai.feedback_recorded
-306 | design.revised
-307 | agent.started
-308 | agent.llm_call
-309 | agent.llm_response
-310 | ai.feedback_recorded
-311 | design_friction.reported
-312 | agent.completed
-313 | verification.result
-314 | agent.started
-315 | agent.llm_call
-316 | agent.llm_response
-317 | ai.feedback_recorded
-318 | agent.completed
-319 | agent.started
-320 | agent.llm_call
-321 | agent.llm_response
-322 | ai.feedback_recorded
-323 | design.revised
-324 | agent.started
-325 | agent.llm_call
-326 | agent.llm_response
-327 | ai.feedback_recorded
-328 | design_friction.reported
-329 | git.committed
-330 | agent.completed
-331 | verification.result
-332 | agent.started
-333 | agent.llm_call
-334 | agent.llm_response
-335 | ai.feedback_recorded
-336 | agent.completed
-337 | agent.started
-338 | agent.llm_call
-339 | agent.llm_response
-340 | ai.feedback_recorded
-341 | design.revised
-342 | agent.started
-343 | agent.llm_call
-344 | agent.llm_response
-345 | ai.feedback_recorded
-346 | design_friction.reported
-347 | agent.completed
-348 | verification.result
-349 | agent.started
-350 | agent.llm_call
-351 | agent.llm_response
-352 | ai.feedback_recorded
-353 | agent.completed
-354 | agent.started
-355 | agent.llm_call
-356 | agent.llm_response
-357 | ai.feedback_recorded
-358 | reviewer.evaluated
-359 | agent.completed
-360 | agent.started
-361 | agent.llm_call
-362 | agent.llm_response
-363 | ai.feedback_recorded
-364 | design_friction.reported
-365 | agent.completed
-366 | verification.result
-367 | agent.started
-368 | agent.llm_call
-369 | agent.llm_response
-370 | ai.feedback_recorded
-371 | agent.completed
-372 | agent.started
-373 | agent.llm_call
-374 | agent.llm_response
-375 | ai.feedback_recorded
-376 | reviewer.evaluated
-377 | agent.completed
-378 | agent.started
-379 | agent.llm_call
-380 | agent.llm_response
-381 | ai.feedback_recorded
-382 | design_friction.reported
-383 | agent.completed
-384 | verification.result
-385 | agent.started
-386 | agent.llm_call
-387 | agent.llm_response
-388 | ai.feedback_recorded
-389 | agent.completed
-390 | agent.started
-391 | agent.llm_call
-392 | agent.llm_response
-393 | ai.feedback_recorded
-394 | design.revised
-395 | agent.started
-396 | agent.llm_call
-397 | agent.llm_response
-398 | ai.feedback_recorded
-399 | design_friction.reported
-400 | agent.completed
-401 | verification.result
-402 | agent.started
-403 | agent.llm_call
-404 | agent.llm_response
-405 | ai.feedback_recorded
-406 | agent.completed
-407 | agent.started
-408 | agent.llm_call
-409 | agent.llm_response
-410 | ai.feedback_recorded
-411 | design.revised
-412 | agent.started
-413 | agent.llm_call
-414 | agent.llm_response
-415 | ai.feedback_recorded
-416 | design_friction.reported
-417 | design_friction.reported
-418 | design_friction.reported
-419 | agent.completed
-420 | verification.result
-421 | agent.started
-422 | agent.llm_call
-423 | agent.llm_response
-424 | ai.feedback_recorded
-425 | agent.completed
-426 | agent.started
-427 | agent.llm_call
-428 | agent.llm_response
-429 | ai.feedback_recorded
-430 | design.revised
-431 | agent.started
-432 | agent.llm_call
-433 | agent.llm_response
-434 | ai.feedback_recorded
-435 | design_friction.reported
-436 | agent.completed
-437 | verification.result
-438 | agent.started
-439 | agent.llm_call
-440 | agent.llm_response
-441 | ai.feedback_recorded
-442 | agent.completed
-443 | agent.started
-444 | agent.llm_call
-445 | agent.llm_response
-446 | ai.feedback_recorded
-447 | design.revised
-448 | agent.started
-449 | agent.llm_call
-450 | agent.llm_response
-451 | ai.feedback_recorded
-452 | design_friction.reported
-453 | agent.completed
-454 | verification.result
-455 | agent.started
-456 | agent.llm_call
-457 | agent.llm_response
-458 | ai.feedback_recorded
-459 | agent.completed
-460 | agent.started
-461 | agent.llm_call
-462 | agent.llm_response
-463 | ai.feedback_recorded
-464 | design.revised
-465 | agent.started
-466 | agent.llm_call
-467 | agent.llm_response
-468 | ai.feedback_recorded
-469 | design_friction.reported
-470 | agent.completed
-471 | verification.result
-472 | agent.started
-473 | agent.llm_call
-474 | agent.llm_response
-475 | ai.feedback_recorded
-476 | agent.completed
-477 | agent.started
-478 | agent.llm_call
-479 | agent.llm_response
-480 | ai.feedback_recorded
-481 | design.revised
-482 | agent.started
-483 | agent.llm_call
-484 | agent.llm_response
-485 | ai.feedback_recorded
-486 | design_friction.reported
-487 | agent.completed
-488 | verification.result
-489 | agent.started
-490 | agent.llm_call
-491 | agent.llm_response
-492 | ai.feedback_recorded
-493 | agent.completed
-494 | agent.started
-495 | agent.llm_call
-496 | agent.llm_response
-497 | ai.feedback_recorded
-498 | design.revised
-499 | agent.started
-500 | agent.llm_call
-501 | agent.llm_response
-502 | ai.feedback_recorded
-503 | design_friction.reported
-504 | agent.completed
-505 | verification.result
-506 | agent.started
-507 | agent.llm_call
-508 | agent.llm_response
-509 | ai.feedback_recorded
-510 | agent.completed
-511 | agent.started
-512 | agent.llm_call
-513 | agent.llm_response
-514 | ai.feedback_recorded
-515 | design.revised
-516 | agent.started
-517 | agent.llm_call
-518 | agent.llm_response
-519 | ai.feedback_recorded
-520 | design_friction.reported
-521 | agent.completed
-522 | verification.result
+197 | design_friction.reported
+198 | agent.completed
+199 | agent.started
+200 | agent.llm_call
+201 | agent.llm_response
+202 | ai.feedback_recorded
+203 | design.revised
+204 | agent.started
+205 | agent.llm_call
+206 | agent.llm_response
+207 | ai.feedback_recorded
+208 | design_friction.reported
+209 | design_friction.reported
+210 | design_friction.reported
+211 | agent.completed
+212 | verification.result
+213 | agent.started
+214 | agent.llm_call
+215 | agent.llm_response
+216 | ai.feedback_recorded
+217 | agent.completed
+218 | agent.started
+219 | agent.llm_call
+220 | agent.llm_response
+221 | ai.feedback_recorded
+222 | design.revised
+223 | agent.started
+224 | agent.llm_call
+225 | agent.llm_response
+226 | ai.feedback_recorded
+227 | design_friction.reported
+228 | agent.completed
+229 | verification.result
+230 | agent.started
+231 | agent.llm_call
+232 | agent.llm_response
+233 | ai.feedback_recorded
+234 | agent.completed
+235 | agent.started
+236 | agent.llm_call
+237 | agent.llm_response
+238 | ai.feedback_recorded
+239 | reviewer.evaluated
+240 | agent.completed
+241 | agent.started
+242 | agent.llm_call
+243 | agent.llm_response
+244 | ai.feedback_recorded
+245 | design_friction.reported
+246 | agent.completed
+247 | verification.result
+248 | agent.started
+249 | agent.llm_call
+250 | agent.llm_response
+251 | ai.feedback_recorded
+252 | agent.completed
+253 | agent.started
+254 | agent.llm_call
+255 | agent.llm_response
+256 | ai.feedback_recorded
+257 | reviewer.evaluated
+258 | agent.completed
+259 | human.checkpoint
+260 | human.decision
+261 | session.completed
 ```

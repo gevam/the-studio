@@ -69,16 +69,13 @@ services:
       timeout: 5s
       retries: 5
 
+  # Build-only: produces the verification image. SandboxRunner launches ephemeral
+  # `docker run --network none` containers per verification (bind-mounting the real
+  # project), so this is not run as a long-lived service.
   sandbox:
     build: ./sandbox
-    volumes:
-      - project-data:/project
-    network_mode: "none"
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 2G
+    image: the-studio-sandbox:latest
+    profiles: ["build-only"]
 
   prometheus:
     image: prom/prometheus:latest

@@ -106,6 +106,31 @@ def test_session_budget_warning_in_valid_types():
     "event_type",
     [
         "agent.started",
+        "slice.started",
+        "slice.built",
+        "slice.verified",
+        "git.committed",
+        "ai.feedback_recorded",
+    ],
+)
+def test_lifecycle_events_emitted_in_codebase(event_type: str):
+    """The §7.2 lifecycle events fixed in CR #2 are actually emitted (not just
+    declared). Guards against regressing back to a declared-but-unemitted event.
+
+    Live-DB emission is asserted end-to-end in tests/integration/test_graph_e2e.py;
+    here we cheaply assert the emit call sites exist in source.
+    """
+    import pathlib
+
+    studio_dir = pathlib.Path(__file__).resolve().parents[2] / "studio"
+    sources = "\n".join(p.read_text() for p in studio_dir.rglob("*.py"))
+    assert f'"{event_type}"' in sources, f"{event_type} is never emitted in studio/"
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    [
+        "agent.started",
         "agent.completed",
         "design.revised",
         "design_friction.reported",

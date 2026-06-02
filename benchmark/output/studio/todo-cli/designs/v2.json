@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "content_hash": "8c558170c9a48187dd704e8f5371d901e5a1896ca2fd23455cab017805b72612",
+  "modules": [],
+  "data_model": [],
+  "ux_flows": [],
+  "customer_journey": "",
+  "experience_metric": {},
+  "architecture_decisions": [],
+  "threat_model": [],
+  "privacy_inventory": [],
+  "i18n_plan": {},
+  "open_questions": [
+    "Design parsing failed — LLM returned invalid JSON"
+  ],
+  "known_friction": [
+    "Could not parse LLM output"
+  ],
+  "sections": []
+}

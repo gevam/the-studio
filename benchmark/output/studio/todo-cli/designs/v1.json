@@ -1,0 +1,259 @@
+{
+  "version": 1,
+  "content_hash": "3620d73ec19357879047b8b314920c67e37865d4f79c4da5849b6e6896eadc2c",
+  "modules": [
+    {
+      "name": "cli",
+      "responsibility": "Parse argv into commands (add/remove/list/complete), render output, map exit codes. No business logic or persistence.",
+      "interfaces": [
+        "CommandParser.parse(argv: list[str]) -> Command",
+        "Renderer.render(result: CommandResult) -> str"
+      ],
+      "dependencies": [
+        "core"
+      ],
+      "injection_points": [
+        "TaskService",
+        "Renderer",
+        "Clock"
+      ]
+    },
+    {
+      "name": "core",
+      "responsibility": "Task domain logic: create, complete, delete, list with filtering/ordering. Enforces invariants (unique id, non-empty title).",
+      "interfaces": [
+        "TaskService.add(title: str) -> Task",
+        "TaskService.complete(id: str) -> Task",
+        "TaskService.remove(id: str) -> None",
+        "TaskService.list(filter: TaskFilter) -> list[Task]"
+      ],
+      "dependencies": [
+        "storage"
+      ],
+      "injection_points": [
+        "TaskRepository",
+        "IdGenerator",
+        "Clock"
+      ]
+    },
+    {
+      "name": "storage",
+      "responsibility": "Persist and retrieve tasks behind a repository Protocol. Default JSON-file implementation; swappable for SQLite.",
+      "interfaces": [
+        "TaskRepository.load() -> list[Task]",
+        "TaskRepository.save(tasks: list[Task]) -> None"
+      ],
+      "dependencies": [],
+      "injection_points": [
+        "path",
+        "Serializer"
+      ]
+    }
+  ],
+  "data_model": [
+    {
+      "name": "Task",
+      "fields": [
+        {
+          "name": "id",
+          "type": "str",
+          "description": "ULID, stable identifier"
+        },
+        {
+          "name": "title",
+          "type": "str",
+          "description": "Non-empty user text"
+        },
+        {
+          "name": "done",
+          "type": "bool",
+          "description": "Completion flag"
+        },
+        {
+          "name": "created_at",
+          "type": "datetime",
+          "description": "UTC creation timestamp"
+        },
+        {
+          "name": "completed_at",
+          "type": "datetime | None",
+          "description": "UTC completion timestamp, null if open"
+        }
+      ],
+      "relationships": [],
+      "privacy_classification": "user-content"
+    }
+  ],
+  "ux_flows": [
+    {
+      "name": "Add task",
+      "steps": [
+        "User runs `todo add \"buy milk\"`",
+        "CLI parses title",
+        "TaskService creates Task with new id",
+        "Repository persists",
+        "Renderer prints confirmation with id"
+      ],
+      "entry_point": "todo add <title>",
+      "success_criteria": "New task persisted and id echoed; exit code 0",
+      "error_states": [
+        "Empty title -> exit 2 with usage message",
+        "Storage write failure -> exit 1 with error, no partial write"
+      ],
+      "i18n_considerations": [
+        "Messages routed through message catalog",
+        "UTF-8 titles preserved"
+      ]
+    },
+    {
+      "name": "List tasks",
+      "steps": [
+        "User runs `todo list [--all]`",
+        "TaskService loads tasks",
+        "Default filter hides completed",
+        "Renderer prints aligned rows"
+      ],
+      "entry_point": "todo list",
+      "success_criteria": "Open tasks shown ordered by created_at; exit code 0",
+      "error_states": [
+        "Corrupt store -> exit 1 with recovery hint"
+      ],
+      "i18n_considerations": [
+        "Column headers localized",
+        "Locale-aware date formatting"
+      ]
+    },
+    {
+      "name": "Complete task",
+      "steps": [
+        "User runs `todo done <id>`",
+        "TaskService marks done, sets completed_at",
+        "Repository persists",
+        "Renderer confirms"
+      ],
+      "entry_point": "todo done <id>",
+      "success_criteria": "Task flagged done idempotently; exit code 0",
+      "error_states": [
+        "Unknown id -> exit 2 with not-found message",
+        "Already done -> no-op, exit 0"
+      ],
+      "i18n_considerations": [
+        "Confirmation localized"
+      ]
+    }
+  ],
+  "customer_journey": "A developer installs todo-cli and immediately runs `todo add` to capture a task without configuration. They check `todo list` to see open work, mark items `todo done`, and trust that state survives across invocations via a local JSON file. The tool stays out of the way: fast, scriptable, predictable exit codes, and no network. When they outgrow JSON they swap the repository for SQLite with no change to commands.",
+  "experience_metric": {
+    "name": "time-to-first-task",
+    "target": "User adds and lists their first task in <= 2 commands with zero configuration",
+    "measurement": "Count commands from fresh install to successful `todo list` showing the added task"
+  },
+  "architecture_decisions": [
+    {
+      "id": "ADR-001",
+      "title": "Repository Protocol abstracts persistence",
+      "context": "Tasks must persist locally, but the storage backend may evolve (JSON file now, SQLite later).",
+      "decision": "Define a TaskRepository Protocol; inject a concrete JSON-file implementation into TaskService.",
+      "rationale": "Dependency inversion keeps core logic free of I/O concerns and makes the service unit-testable with an in-memory fake.",
+      "consequences": [
+        "Swappable backends without touching core",
+        "Slight indirection overhead",
+        "Requires DI wiring at the composition root"
+      ],
+      "status": "accepted",
+      "date": "2026-06-02T14:55:14.328437"
+    },
+    {
+      "id": "ADR-002",
+      "title": "Inject Clock and IdGenerator",
+      "context": "Tasks carry timestamps and ids; tests need determinism.",
+      "decision": "Provide Clock and IdGenerator Protocols injected into the service rather than calling datetime.now()/ULID inline.",
+      "rationale": "Deterministic, reproducible tests and no hidden global state.",
+      "consequences": [
+        "Reproducible tests",
+        "Two extra injection points to wire"
+      ],
+      "status": "accepted",
+      "date": "2026-06-02T14:55:14.328437"
+    }
+  ],
+  "threat_model": [
+    {
+      "threat_type": "T",
+      "description": "Malicious or corrupt JSON store causes deserialization errors or injected fields.",
+      "component": "storage",
+      "mitigation": "Validate loaded data through Pydantic models; reject unknown fields; atomic write via temp-file-and-rename.",
+      "status": "mitigated"
+    },
+    {
+      "threat_type": "I",
+      "description": "Task titles may contain sensitive user content readable by other local users.",
+      "component": "storage",
+      "mitigation": "Store under user-owned path with 0600 permissions; document that contents are plaintext local data.",
+      "status": "mitigated"
+    },
+    {
+      "threat_type": "D",
+      "description": "Concurrent invocations race on the store file and clobber writes.",
+      "component": "storage",
+      "mitigation": "Acquire an advisory file lock around read-modify-write; atomic rename on save.",
+      "status": "open"
+    }
+  ],
+  "privacy_inventory": [
+    {
+      "data_element": "task.title",
+      "classification": "user-content",
+      "purpose": "Represent the user's todo item",
+      "retention": "Until user deletes the task or clears the store",
+      "encryption": "At-rest relies on OS filesystem permissions (0600); no app-level encryption",
+      "erasure_path": "`todo remove <id>` deletes the entry; deleting the store file erases all"
+    }
+  ],
+  "i18n_plan": {
+    "framework": "gettext-style message catalog",
+    "locales": [
+      "en",
+      "he"
+    ],
+    "rtl_strategy": "Renderer detects RTL locales (he) and aligns columns right-to-left; titles preserved as UTF-8 without reshaping",
+    "default_locale": "en"
+  },
+  "open_questions": [
+    "Should completed tasks be retained indefinitely or auto-pruned after N days?",
+    "Is file-lock-based concurrency sufficient, or is SQLite needed in v1 to close threat D?"
+  ],
+  "known_friction": [],
+  "sections": [
+    {
+      "id": "modules",
+      "title": "Module Boundaries",
+      "content": "Three layers: cli (parsing/rendering), core (TaskService domain logic), storage (TaskRepository Protocol). Dependencies flow cli -> core -> storage; storage depends on nothing. DI at composition root injects repository, clock, and id generator.",
+      "content_hash": ""
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "content": "Single Task entity: id (ULID), title (non-empty), done (bool), created_at, completed_at. No relationships. Title classified user-content.",
+      "content_hash": ""
+    },
+    {
+      "id": "flows",
+      "title": "UX Flows",
+      "content": "add, list (open by default, --all for completed), done. Exit codes: 0 success, 1 storage error, 2 usage/not-found. All messages localizable.",
+      "content_hash": ""
+    },
+    {
+      "id": "decisions",
+      "title": "Architecture Decisions",
+      "content": "ADR-001 Repository Protocol for swappable persistence. ADR-002 Inject Clock and IdGenerator for deterministic tests.",
+      "content_hash": ""
+    },
+    {
+      "id": "security-privacy",
+      "title": "Security & Privacy",
+      "content": "STRIDE: tampering/info-disclosure mitigated via validated atomic writes and 0600 perms; concurrent-write DoS open pending file lock. Titles are user-content with deletion-based erasure path.",
+      "content_hash": ""
+    }
+  ]
+}

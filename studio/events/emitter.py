@@ -47,13 +47,20 @@ async def emit_event(
     if event_type not in VALID_EVENT_TYPES:
         logger.warning("unknown_event_type", event_type=event_type)
 
-    # Atomically compute next seq within the current transaction
+    # Lock the session row to serialize seq generation, then compute MAX.
+    # FOR UPDATE on an aggregate is not allowed in PostgreSQL, so we hold
+    # the session row lock instead and compute the aggregate separately.
+    lock_result = await db.execute(
+        text("SELECT id FROM sessions WHERE id = :sid FOR UPDATE"),
+        {"sid": session_id},
+    )
+    if lock_result.scalar_one_or_none() is None:
+        raise ValueError(f"Session {session_id} not found — cannot emit event")
     result = await db.execute(
         text(
             "SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq "
             "FROM event_log "
-            "WHERE session_id = :sid "
-            "FOR UPDATE"
+            "WHERE session_id = :sid"
         ),
         {"sid": session_id},
     )

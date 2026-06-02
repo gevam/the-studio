@@ -1,8 +1,6 @@
-"""Arq worker configuration and job definitions.
+"""Arq worker configuration and job definitions."""
 
-Sprint 0: worker starts, enqueues, dequeues a ping job.
-Sprint 1+ will add: run_session_graph, cancel_session.
-"""
+import uuid
 
 from arq import create_pool
 from arq.connections import RedisSettings
@@ -24,9 +22,60 @@ async def ping(ctx: dict, message: str = "pong") -> str:
 
 
 async def run_session_graph(ctx: dict, session_id: str) -> dict:
-    """Placeholder: will run LangGraph session in Sprint 1."""
-    logger.info("run_session_graph_stub", session_id=session_id)
-    return {"session_id": session_id, "status": "not_implemented"}
+    """Run the LangGraph session graph for a given session."""
+    from studio.ai.llm_client import LLMClient
+    from studio.ai.prompt_loader import PromptLoader
+    from studio.db.projection import project_state
+    from studio.db.session import AsyncSessionLocal
+    from studio.graph.builder import build_sprint1_graph
+
+    logger.info("run_session_graph_start", session_id=session_id)
+
+    llm = LLMClient(provider="auto")
+    prompt_loader = PromptLoader()
+
+    compiled = build_sprint1_graph(
+        db_factory=AsyncSessionLocal,
+        llm=llm,
+        prompt_loader=prompt_loader,
+    )
+
+    # Load initial state from DB
+    try:
+        sid = uuid.UUID(session_id)
+        async with AsyncSessionLocal() as db:
+            state = await project_state(sid, db)
+            await db.commit()
+    except Exception as exc:
+        logger.error("run_session_graph_init_error", session_id=session_id, error=str(exc))
+        return {"session_id": session_id, "status": "error", "error": str(exc)}
+
+    # Run graph — each node opens its own DB session via the factory
+    try:
+        final_state = await compiled.ainvoke(state)
+        status = "completed" if final_state.get("skeleton_verified") else "error"
+        logger.info(
+            "run_session_graph_done",
+            session_id=session_id,
+            status=status,
+            iterations=final_state.get("iteration", 0),
+        )
+        return {
+            "session_id": session_id,
+            "status": status,
+            "iterations": final_state.get("iteration", 0),
+            "cost_usd": final_state.get("cost_usd", 0.0),
+        }
+    except Exception as exc:
+        logger.error("run_session_graph_error", session_id=session_id, error=str(exc))
+        # Mark session as error in DB
+        async with AsyncSessionLocal() as db:
+            from studio.db.models import Session as SessionModel
+            session = await db.get(SessionModel, sid)
+            if session:
+                session.status = "error"
+                await db.commit()
+        return {"session_id": session_id, "status": "error", "error": str(exc)}
 
 
 # --- Startup / shutdown hooks ---

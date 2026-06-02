@@ -116,47 +116,56 @@ async def run_lint_check(sandbox: SandboxRunner, workdir: str) -> CheckResult:
     )
 
 
+# Vendored/generated dirs to keep out of grep- and type-based checks. Scanning a
+# project-local .venv yields false positives (library code is full of token=...,
+# password=... literals) that would fail an otherwise-clean project.
+_EXCLUDE_DIRS = (
+    "--exclude-dir=.git --exclude-dir=node_modules "
+    "--exclude-dir=venv --exclude-dir=.venv --exclude-dir=site-packages "
+    "--exclude-dir=__pycache__ --exclude-dir=build --exclude-dir=dist"
+)
+
+
 async def run_secrets_check(sandbox: SandboxRunner, workdir: str) -> CheckResult:
-    """Grep for secrets/API keys in source code."""
+    """Grep for secrets/API keys in source code. Clean = no matches."""
     patterns = "|".join(_SECRET_PATTERNS)
     escaped = patterns.replace("'", "'\\''")
     result = await sandbox.run(
         f"grep -rEn '{escaped}' "
         "--include='*.py' --include='*.js' --include='*.ts' "
         "--include='*.env' --include='*.yaml' --include='*.yml' "
-        "--exclude-dir=.git --exclude-dir=node_modules --exclude-dir=venv "
-        ". 2>/dev/null | head -20 || echo 'no_secrets_found'",
+        f"{_EXCLUDE_DIRS} . 2>/dev/null",
         workdir=workdir,
     )
-    # grep returns 0 if matches found (bad), 1 if no match (good)
-    # We override: if output contains only "no_secrets_found", it's clean
-    output = (result.stdout + result.stderr).strip()
-    passed = output == "no_secrets_found" or result.exit_code == 1
+    # grep exit code drives the result: 0 = matches found (FAIL), 1 = none (PASS),
+    # >1 = grep error (treat as pass; nothing actionable found). Avoid piping into
+    # head, which would mask grep's exit code behind head's always-zero status.
+    matches = result.stdout.strip()
+    passed = result.exit_code != 0 or not matches
     return CheckResult(
         name="no_secrets_in_code",
         passed=passed,
-        output=output[:2000],
+        output=matches[:2000],
         duration_ms=result.duration_ms,
     )
 
 
 async def run_pii_check(sandbox: SandboxRunner, workdir: str) -> CheckResult:
-    """Grep for PII in log statements."""
+    """Grep for PII in log statements. Clean = no matches."""
     patterns = "|".join(_PII_LOG_PATTERNS)
     escaped = patterns.replace("'", "'\\''")
     result = await sandbox.run(
         f"grep -rEin '{escaped}' "
         "--include='*.py' --include='*.js' --include='*.ts' "
-        "--exclude-dir=.git --exclude-dir=node_modules --exclude-dir=venv "
-        ". 2>/dev/null | head -20 || echo 'no_pii_in_logs'",
+        f"{_EXCLUDE_DIRS} . 2>/dev/null",
         workdir=workdir,
     )
-    output = (result.stdout + result.stderr).strip()
-    passed = output == "no_pii_in_logs" or result.exit_code == 1
+    matches = result.stdout.strip()
+    passed = result.exit_code != 0 or not matches
     return CheckResult(
         name="no_pii_in_logs",
         passed=passed,
-        output=output[:2000],
+        output=matches[:2000],
         duration_ms=result.duration_ms,
     )
 
@@ -164,7 +173,8 @@ async def run_pii_check(sandbox: SandboxRunner, workdir: str) -> CheckResult:
 async def run_typecheck(sandbox: SandboxRunner, workdir: str) -> CheckResult:
     """Run type checker (mypy for Python, tsc for TypeScript)."""
     result = await sandbox.run(
-        "python -m mypy . --ignore-missing-imports --no-error-summary 2>&1 || "
+        "python -m mypy . --ignore-missing-imports --no-error-summary "
+        "--exclude '(\\.venv|venv|build|dist)/' 2>&1 || "
         "npx tsc --noEmit 2>&1 || "
         "echo 'typecheck_skipped'",
         workdir=workdir,

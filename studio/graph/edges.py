@@ -92,10 +92,19 @@ def human_gate_design_router(state: GraphState) -> str:
 
 
 def feature_friction_router(state: GraphState) -> str:
-    """After a feature build: design friction → design, else verify the slice."""
+    """After a feature build: design friction → design (capped), else verify.
+
+    Capped by build attempts for the current slice: a design revision doesn't
+    necessarily eliminate code-level friction, so without a bound the
+    build→friction→design loop can churn indefinitely. After the cap we proceed to
+    verify and let the deterministic checks gate quality.
+    """
     if state.get("error"):
         return "complete"
-    return "design_agent" if state.get("pending_friction_ids") else "verify"
+    max_build = (state.get("config") or {}).get("max_feature_build_attempts", 3)
+    if state.get("pending_friction_ids") and state.get("build_iterations", 0) < max_build:
+        return "design_agent"
+    return "verify"
 
 
 def verify_router(state: GraphState) -> str:

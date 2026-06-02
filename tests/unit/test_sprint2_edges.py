@@ -5,11 +5,21 @@ from __future__ import annotations
 from studio.graph.edges import (
     design_agent_router,
     design_ux_router,
+    feature_friction_router,
     reviewer_router,
     slice_done_router,
     ux_review_router,
     verify_router,
 )
+
+
+def test_feature_friction_loop_is_capped():
+    cfg = {"config": {"max_feature_build_attempts": 3}}
+    under = {**cfg, "pending_friction_ids": ["f"], "build_iterations": 1}
+    capped = {**cfg, "pending_friction_ids": ["f"], "build_iterations": 3}
+    assert feature_friction_router(under) == "design_agent"  # under the cap → revise
+    assert feature_friction_router(capped) == "verify"  # cap reached → stop churning
+    assert feature_friction_router({**cfg, "pending_friction_ids": []}) == "verify"
 
 
 def test_design_agent_router_is_phase_aware():

@@ -263,6 +263,7 @@ async def slice_done_node(state: GraphState, *, db, **_) -> dict:
     return {
         "current_node": "slice_done",
         "current_slice_id": None,
-        # reset per-slice retry counters for the next slice
+        # reset per-slice loop budgets for the next slice
         "verify_retries": 0,
+        "build_iterations": 0,
     }

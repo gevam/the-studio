@@ -62,14 +62,18 @@ async def run_verification(
     from studio.observability.metrics import verification_failures_total
 
     if sandbox is None:
-        sandbox = SandboxRunner()
+        sandbox = SandboxRunner(project_path=project_path)
 
     start = time.monotonic()
 
-    # Check sandbox is alive
+    # Check the sandbox image is available (Docker reachable + image built)
     if not await sandbox.is_alive():
-        logger.warning("sandbox_not_running", container=sandbox._container)
-        result = _make_failed_result("Sandbox container not running", start)
+        logger.warning("sandbox_unavailable", image=sandbox._image)
+        result = _make_failed_result(
+            f"Sandbox image '{sandbox._image}' unavailable — "
+            "build it: docker build -t the-studio-sandbox:latest ./sandbox",
+            start,
+        )
         await _persist_result(db, session_id, slice_id, result)
         await emit_event(
             db,

@@ -1,8 +1,16 @@
-"""Sandbox runner: executes commands in the verification Docker container."""
+"""Sandbox runner: executes verification commands in an ephemeral Docker container.
+
+Each run launches a fresh `docker run` with the project bind-mounted at /project,
+network disabled (`--network none`), and CPU/memory capped per §5. Running the build
+on the host while verifying in a shared persistent volume meant the sandbox never saw
+the generated project; bind-mounting the real project_path is what lets verification
+actually evaluate what the build agent produced.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from dataclasses import dataclass
 
@@ -10,9 +18,13 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-# The sandbox container name matches docker-compose.yml
-SANDBOX_CONTAINER = "the-studio-sandbox-1"
+# Image built from ./sandbox (docker build -t the-studio-sandbox:latest ./sandbox).
+SANDBOX_IMAGE = os.environ.get("STUDIO_SANDBOX_IMAGE", "the-studio-sandbox:latest")
 SANDBOX_TIMEOUT_SECONDS = 300
+SANDBOX_MEMORY = "2g"
+SANDBOX_CPUS = "2"
+# Mount point inside the container; checks default their workdir to this.
+SANDBOX_MOUNT = "/project"
 
 
 @dataclass
@@ -28,23 +40,44 @@ class SandboxResult:
 
 
 class SandboxRunner:
-    """Runs commands inside the verification sandbox container via docker exec."""
+    """Runs commands inside an ephemeral, network-isolated verification container.
+
+    The host ``project_path`` is bind-mounted read-write at ``/project`` for the
+    lifetime of each command, so checks operate on the freshly built project.
+    """
 
     def __init__(
         self,
-        container: str = SANDBOX_CONTAINER,
+        project_path: str | None = None,
+        *,
+        image: str = SANDBOX_IMAGE,
         timeout: int = SANDBOX_TIMEOUT_SECONDS,
     ) -> None:
-        self._container = container
+        # Absolute path required for a bind mount.
+        self._project_path = os.path.abspath(project_path) if project_path else None
+        self._image = image
         self._timeout = timeout
 
-    async def run(self, command: str, *, workdir: str = "/project") -> SandboxResult:
-        """Execute a shell command inside the sandbox container."""
+    async def run(self, command: str, *, workdir: str = SANDBOX_MOUNT) -> SandboxResult:
+        """Execute a shell command inside a fresh sandbox container."""
+        if not self._project_path:
+            return SandboxResult(
+                exit_code=126,
+                stdout="",
+                stderr="SandboxRunner has no project_path to mount",
+                duration_ms=0,
+            )
+
         cmd = [
-            "docker", "exec",
+            "docker", "run", "--rm",
+            "--network", "none",
+            "--memory", SANDBOX_MEMORY,
+            "--cpus", SANDBOX_CPUS,
+            "--volume", f"{self._project_path}:{SANDBOX_MOUNT}",
             "--workdir", workdir,
-            self._container,
-            "bash", "-c", command,
+            "--entrypoint", "bash",
+            self._image,
+            "-c", command,
         ]
         start = time.monotonic()
         try:
@@ -56,7 +89,7 @@ class SandboxRunner:
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=self._timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             duration_ms = int((time.monotonic() - start) * 1000)
             logger.warning(
                 "sandbox_timeout",
@@ -80,7 +113,7 @@ class SandboxRunner:
 
         duration_ms = int((time.monotonic() - start) * 1000)
         result = SandboxResult(
-            exit_code=proc.returncode,
+            exit_code=proc.returncode if proc.returncode is not None else -1,
             stdout=stdout.decode(errors="replace"),
             stderr=stderr.decode(errors="replace"),
             duration_ms=duration_ms,
@@ -94,14 +127,14 @@ class SandboxRunner:
         return result
 
     async def is_alive(self) -> bool:
-        """Check if the sandbox container is running."""
+        """Check that Docker is reachable and the sandbox image is available."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "docker", "inspect", "--format", "{{.State.Running}}", self._container,
+                "docker", "image", "inspect", self._image,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-            return stdout.decode().strip() == "true"
+            await asyncio.wait_for(proc.communicate(), timeout=10)
+            return proc.returncode == 0
         except Exception:
             return False

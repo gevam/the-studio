@@ -1,0 +1,397 @@
+{
+  "version": 3,
+  "content_hash": "47fde48361418ab728fc42eeabf5a70ef506f14dd16fd8e3e8241e4c10bb43ff",
+  "modules": [
+    {
+      "name": "ShortenService",
+      "responsibility": "Generate and persist short codes for long URLs; enforce idempotency and collision avoidance.",
+      "interfaces": [
+        "class URLShortener(Protocol):\n    def shorten(self, long_url: str, owner_id: str | None = None) -> ShortLink: ...\n    def resolve(self, code: str) -> str | None: ..."
+      ],
+      "dependencies": [
+        "LinkRepository",
+        "CodeGenerator"
+      ],
+      "injection_points": [
+        "LinkRepository (storage backend)",
+        "CodeGenerator (encoding strategy)"
+      ]
+    },
+    {
+      "name": "RedirectService",
+      "responsibility": "Resolve a short code to its target URL, issue an HTTP redirect, and emit a click event asynchronously.",
+      "interfaces": [
+        "class Redirector(Protocol):\n    def redirect(self, code: str) -> RedirectResult: ..."
+      ],
+      "dependencies": [
+        "LinkRepository",
+        "ClickRecorder"
+      ],
+      "injection_points": [
+        "ClickRecorder (event sink)"
+      ]
+    },
+    {
+      "name": "StatsService",
+      "responsibility": "Record click events and expose aggregate click statistics per short code.",
+      "interfaces": [
+        "class ClickRecorder(Protocol):\n    def record(self, event: ClickEvent) -> None: ...\nclass StatsReader(Protocol):\n    def stats_for(self, code: str) -> ClickStats: ..."
+      ],
+      "dependencies": [
+        "ClickRepository"
+      ],
+      "injection_points": [
+        "ClickRepository (analytics store)",
+        "Clock (timestamp source)"
+      ]
+    },
+    {
+      "name": "RateLimiter",
+      "responsibility": "Throttle requests per client identity (IP/API key) across shorten and redirect endpoints using a token-bucket policy.",
+      "interfaces": [
+        "class RateLimiter(Protocol):\n    def check(self, client_id: str, action: str) -> RateDecision: ..."
+      ],
+      "dependencies": [
+        "RateStore"
+      ],
+      "injection_points": [
+        "RateStore (in-memory or Redis)",
+        "Clock"
+      ]
+    },
+    {
+      "name": "APIGateway",
+      "responsibility": "HTTP boundary: route requests, validate input, apply rate limiting middleware, map domain results to HTTP responses.",
+      "interfaces": [
+        "class Handler(Protocol):\n    def handle(self, request: Request) -> Response: ..."
+      ],
+      "dependencies": [
+        "ShortenService",
+        "RedirectService",
+        "StatsService",
+        "RateLimiter"
+      ],
+      "injection_points": [
+        "All domain services injected at composition root"
+      ]
+    }
+  ],
+  "data_model": [
+    {
+      "name": "ShortLink",
+      "fields": [
+        {
+          "name": "code",
+          "type": "str",
+          "nullable": false,
+          "note": "primary key, base62, 7 chars"
+        },
+        {
+          "name": "long_url",
+          "type": "str",
+          "nullable": false,
+          "note": "validated http(s) URL"
+        },
+        {
+          "name": "owner_id",
+          "type": "str",
+          "nullable": true,
+          "note": "API-key hash if authenticated"
+        },
+        {
+          "name": "created_at",
+          "type": "datetime",
+          "nullable": false
+        },
+        {
+          "name": "expires_at",
+          "type": "datetime",
+          "nullable": true
+        }
+      ],
+      "relationships": [
+        "1:N ClickEvent via code"
+      ],
+      "privacy_classification": "internal"
+    },
+    {
+      "name": "ClickEvent",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": false
+        },
+        {
+          "name": "code",
+          "type": "str",
+          "nullable": false,
+          "note": "FK to ShortLink.code"
+        },
+        {
+          "name": "timestamp",
+          "type": "datetime",
+          "nullable": false
+        },
+        {
+          "name": "ip_hash",
+          "type": "str",
+          "nullable": true,
+          "note": "salted SHA-256 of client IP, never raw IP"
+        },
+        {
+          "name": "referrer",
+          "type": "str",
+          "nullable": true
+        },
+        {
+          "name": "user_agent",
+          "type": "str",
+          "nullable": true
+        }
+      ],
+      "relationships": [
+        "N:1 ShortLink via code"
+      ],
+      "privacy_classification": "pii"
+    },
+    {
+      "name": "ClickStats",
+      "fields": [
+        {
+          "name": "code",
+          "type": "str",
+          "nullable": false
+        },
+        {
+          "name": "total_clicks",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "unique_visitors",
+          "type": "int",
+          "nullable": false,
+          "note": "distinct ip_hash count"
+        },
+        {
+          "name": "last_clicked_at",
+          "type": "datetime",
+          "nullable": true
+        }
+      ],
+      "relationships": [
+        "derived from ClickEvent"
+      ],
+      "privacy_classification": "internal"
+    }
+  ],
+  "ux_flows": [
+    {
+      "name": "Shorten a URL",
+      "steps": [
+        "Client POSTs {long_url} to /api/shorten",
+        "Gateway applies rate limit check",
+        "ShortenService validates URL and generates a unique code",
+        "Returns {short_url, code}"
+      ],
+      "entry_point": "POST /api/shorten",
+      "success_criteria": "201 with short_url returned in a single request",
+      "error_states": [
+        "400 invalid URL",
+        "429 rate limited",
+        "503 storage unavailable"
+      ],
+      "i18n_considerations": [
+        "Error messages localized via message catalog",
+        "URL validation must accept IDN/punycode hosts"
+      ]
+    },
+    {
+      "name": "Follow a short link",
+      "steps": [
+        "Client GETs /{code}",
+        "RedirectService resolves code",
+        "Click event emitted asynchronously",
+        "302 redirect to long_url issued"
+      ],
+      "entry_point": "GET /{code}",
+      "success_criteria": "302 redirect issued in <50ms p95",
+      "error_states": [
+        "404 unknown/expired code",
+        "410 expired link",
+        "429 rate limited"
+      ],
+      "i18n_considerations": [
+        "404 page localized"
+      ]
+    },
+    {
+      "name": "View click stats",
+      "steps": [
+        "Client GETs /api/stats/{code}",
+        "StatsService aggregates ClickEvents",
+        "Returns ClickStats JSON"
+      ],
+      "entry_point": "GET /api/stats/{code}",
+      "success_criteria": "Accurate counts returned in one request",
+      "error_states": [
+        "404 unknown code",
+        "429 rate limited"
+      ],
+      "i18n_considerations": [
+        "Timestamps returned ISO-8601 UTC; client formats per locale"
+      ]
+    }
+  ],
+  "customer_journey": "A developer integrating link-sharing into their app sends a long URL to the shorten endpoint and immediately receives a compact short URL. End users click the short URL anywhere and are transparently redirected to the destination with negligible latency. The original developer later queries the stats endpoint to see total and unique click counts, informing how they distribute links. Throughout, abusive traffic is throttled so the service stays responsive and link generation remains cheap and reliable.",
+  "experience_metric": {
+    "name": "shorten_latency_and_steps",
+    "target": "Shorten a URL in 1 API call returning in <100ms p95; redirect in <50ms p95",
+    "rationale": "Single-call simplicity and low latency are the core value props of a shortener."
+  },
+  "architecture_decisions": [
+    {
+      "id": "ADR-001",
+      "title": "Asynchronous, fire-and-forget click recording decoupled from redirect path",
+      "context": "Redirects must be fast and reliable. Recording analytics synchronously on the hot redirect path adds latency and couples redirect availability to the analytics store's availability.",
+      "decision": "RedirectService resolves the code and issues the 302 immediately, then enqueues a ClickEvent to the ClickRecorder via a non-blocking sink. Stats are computed from the recorded events independently.",
+      "rationale": "Keeps the redirect path on the critical fast path independent of analytics durability; satisfies the <50ms p95 redirect metric; honors SRP by separating navigation from measurement.",
+      "consequences": [
+        "Click counts are eventually consistent, not real-time",
+        "A dropped/failed recorder loses a click event unless a durable queue is used",
+        "Redirect remains available even if the analytics store is down",
+        "Requires an injectable ClickRecorder with a buffering/queue implementation"
+      ],
+      "status": "accepted",
+      "date": "2026-06-02T19:39:04.095442"
+    },
+    {
+      "id": "ADR-002",
+      "title": "Token-bucket rate limiting at the gateway middleware layer",
+      "context": "Both shorten (write-heavy, abuse-prone) and redirect (read-heavy) endpoints need protection from abuse without penalizing normal use.",
+      "decision": "Apply a token-bucket RateLimiter as gateway middleware keyed by API key (if present) else hashed client IP, with per-action buckets.",
+      "rationale": "Token bucket allows bursts while bounding sustained rate; centralizing at the gateway keeps domain services free of cross-cutting throttling logic (SRP/OCP).",
+      "consequences": [
+        "Requires a shared RateStore (Redis) for multi-instance correctness",
+        "In-memory store acceptable only for single-instance deployments",
+        "Adds one store lookup per request"
+      ],
+      "status": "accepted",
+      "date": "2026-06-02T19:39:04.095442"
+    }
+  ],
+  "threat_model": [
+    {
+      "threat_type": "Tampering",
+      "description": "Attacker enumerates or guesses short codes to discover/scrape private destination URLs (open-redirect harvesting).",
+      "component": "RedirectService / CodeGenerator",
+      "mitigation": "Use sufficiently large random base62 codes (7+ chars) rather than sequential IDs; optionally support owner-scoped private links.",
+      "status": "mitigated"
+    },
+    {
+      "threat_type": "Denial of Service",
+      "description": "Flood of shorten requests exhausts storage and code space, or redirect floods saturate the service.",
+      "component": "APIGateway / RateLimiter",
+      "mitigation": "Token-bucket rate limiting per client identity on all endpoints (ADR-002); reject with 429.",
+      "status": "mitigated"
+    },
+    {
+      "threat_type": "Information Disclosure",
+      "description": "Storing raw client IPs in ClickEvents exposes PII and creates a breach/compliance liability.",
+      "component": "StatsService / ClickEvent",
+      "mitigation": "Store only salted SHA-256 IP hashes; never persist raw IPs; document retention and erasure.",
+      "status": "mitigated"
+    },
+    {
+      "threat_type": "Spoofing",
+      "description": "Shortener used to mask malicious destinations in phishing campaigns.",
+      "component": "ShortenService",
+      "mitigation": "Optional destination allow/deny-list and safe-browsing check at shorten time.",
+      "status": "open"
+    }
+  ],
+  "privacy_inventory": [
+    {
+      "data_element": "Client IP address",
+      "classification": "pii",
+      "purpose": "Rate limiting and unique-visitor estimation",
+      "retention": "Rate-limit context: ephemeral (bucket TTL). Analytics: never stored raw — hashed only.",
+      "encryption": "Salted SHA-256 one-way hash at ingestion; salt stored separately, rotated periodically.",
+      "erasure_path": "Hashes auto-expire with ClickEvent retention; per-code purge endpoint deletes all ClickEvents for a code."
+    },
+    {
+      "data_element": "User-Agent / Referrer",
+      "classification": "internal",
+      "purpose": "Aggregate click analytics",
+      "retention": "90 days, then aggregated and raw events purged",
+      "encryption": "At-rest encryption on analytics store",
+      "erasure_path": "Deleted on link deletion or retention expiry"
+    },
+    {
+      "data_element": "Destination long_url",
+      "classification": "internal",
+      "purpose": "Core redirect function",
+      "retention": "Lifetime of ShortLink or until expires_at",
+      "encryption": "At-rest encryption on link store",
+      "erasure_path": "DELETE /api/links/{code} removes link and cascades to ClickEvents"
+    }
+  ],
+  "i18n_plan": {
+    "framework": "ICU MessageFormat via gettext-style catalogs",
+    "locales": [
+      "en",
+      "es",
+      "fr",
+      "ar"
+    ],
+    "rtl_strategy": "Logical CSS properties and dir=auto for any HTML error/landing pages; API responses are locale-neutral (ISO-8601 UTC timestamps, machine codes)",
+    "notes": "URL validation accepts IDN/punycode; error message keys returned alongside localized text"
+  },
+  "open_questions": [
+    "Should click recording use a durable queue (Kafka/Redis Streams) or is best-effort in-process buffering acceptable for the stats accuracy SLA?",
+    "Is link expiration (expires_at) in scope for iteration 2, or deferred?",
+    "Do we need authenticated/owner-scoped links and an API-key system, or is the service fully anonymous?",
+    "What is the unique-visitor definition window (per-day, lifetime) for ClickStats?",
+    "Single-instance (in-memory rate store) vs. multi-instance (Redis) deployment target?"
+  ],
+  "known_friction": [],
+  "sections": [
+    {
+      "id": "sec-modules",
+      "title": "Module Boundaries",
+      "content": "Five modules: ShortenService, RedirectService, StatsService, RateLimiter, APIGateway. Domain services are injected into the gateway at the composition root. ClickRecorder is the seam decoupling redirect from analytics (see ADR-001).",
+      "content_hash": "6535e2e00aa52e2e8294301c870964fe5fc9602355852c3f6d0732b1f8fe2319"
+    },
+    {
+      "id": "sec-data",
+      "title": "Data Model",
+      "content": "ShortLink (code PK, long_url, owner_id?, created_at, expires_at?), ClickEvent (id, code FK, timestamp, ip_hash?, referrer?, user_agent?) classified PII, ClickStats derived aggregate. Raw IPs never stored.",
+      "content_hash": "ebff222e7ac50b7f47c5f2363e348e6e95ebc5ef567c8d034cc3ea79506151db"
+    },
+    {
+      "id": "sec-flows",
+      "title": "UX/API Flows",
+      "content": "POST /api/shorten -> 201 short_url; GET /{code} -> 302 redirect + async click; GET /api/stats/{code} -> ClickStats. All flows pass rate-limit middleware returning 429 on throttle.",
+      "content_hash": "29b587f0560507ea54448af0dc45e6331a788dbadc959a63e802d5e511d937e1"
+    },
+    {
+      "id": "sec-decisions",
+      "title": "Architecture Decisions",
+      "content": "ADR-001 async fire-and-forget click recording keeps redirect on fast path (eventual-consistency tradeoff). ADR-002 token-bucket rate limiting at gateway keyed by API key or hashed IP.",
+      "content_hash": "65465f8ce278954feebb3f5bbbe26b912f59f20aeee6c7963857b1a12bbf4972"
+    },
+    {
+      "id": "sec-security-privacy",
+      "title": "Threat Model & Privacy",
+      "content": "Top threats: code enumeration (random 7-char codes), DoS (rate limiting), IP disclosure (hash-only). PII = client IP (hashed, ephemeral) and UA/referrer (90-day retention, cascade erasure on link delete).",
+      "content_hash": "d0fc361ac070dea84f6a2bb1e0233e8d138485689f0d2480c13357854772539d"
+    },
+    {
+      "id": "sec-digest",
+      "title": "Digest",
+      "content": "url-shortener v2: 5 modules (Shorten, Redirect, Stats, RateLimiter, Gateway) wired via DI at a composition root. ShortLink + ClickEvent (PII, IP hashed only) + derived ClickStats. Flows: POST /api/shorten->201; GET /{code}->302 with async click recording; GET /api/stats/{code}. Key decisions: ADR-001 async fire-and-forget click recording keeps redirects <50ms p95 (eventual-consistent stats); ADR-002 token-bucket rate limiting at gateway keyed by API key/hashed IP. Metric: shorten in 1 call <100ms p95. STRIDE top-3: code enumeration->random base62 codes; DoS->rate limiting; IP disclosure->salted SHA-256 hashes, no raw IPs, 90-day retention with cascade erasure. Open: durable queue vs buffer, expiration scope, auth/owner links, unique-visitor window, single vs multi-instance store.",
+      "content_hash": "e55f94d2328d47e3d1fa11ca18f9680eff02db1e574d46d8845b004a29fbd18d"
+    }
+  ]
+}

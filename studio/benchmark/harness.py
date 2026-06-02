@@ -201,8 +201,11 @@ async def run_studio_benchmark(
             config={
                 "project_path": str(project_path),
                 "stack": "python",
-                "max_design_iterations": 3,
-                "max_design_ux_loops": 3,
+                # Modest loop caps keep a real-LLM run bounded while still letting
+                # each loop fire at least once.
+                "max_design_iterations": 2,
+                "max_design_ux_loops": 1,
+                "max_feature_build_attempts": 2,
                 # Non-interactive run: the design/ship gates auto-approve so the
                 # session completes; they still emit human.checkpoint/decision.
                 "auto_approve_gates": True,

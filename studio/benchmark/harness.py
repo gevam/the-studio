@@ -101,6 +101,20 @@ class Comparison:
         return "\n".join(lines)
 
 
+def _resolve_coverage(verified_coverage, static_estimate: float) -> float:
+    """Coverage to report for a Studio run.
+
+    Prefer the real line coverage recorded by a passing verification run
+    (verification_results.test_coverage); fall back to analyze_project's static
+    estimate only when no verification row exists. analyze_project does not
+    execute the suite, so its estimate reads 0.0% even when the skeleton verified
+    at, e.g., 86% — the verified value is the truthful number.
+    """
+    if verified_coverage is not None:
+        return float(verified_coverage)
+    return float(static_estimate)
+
+
 async def run_baseline_benchmark(
     project: BenchmarkProject,
     output_dir: Path,
@@ -221,7 +235,7 @@ async def run_studio_benchmark(
 
     # Pull metrics from DB
     from sqlalchemy import select, func
-    from studio.db.models import DesignFriction, DesignRevision
+    from studio.db.models import DesignFriction, DesignRevision, VerificationResult
     async with AsyncSessionLocal() as db:
         rev_count = await db.scalar(
             select(func.count()).select_from(DesignRevision)
@@ -236,6 +250,14 @@ async def run_studio_benchmark(
             .where(DesignFriction.session_id == session_id)
             .where(DesignFriction.status == "resolved")
         )
+        # Real coverage from the latest passing verification run, if any.
+        verified_coverage = await db.scalar(
+            select(VerificationResult.test_coverage)
+            .where(VerificationResult.session_id == session_id)
+            .where(VerificationResult.passed.is_(True))
+            .order_by(VerificationResult.created_at.desc())
+            .limit(1)
+        )
 
     from studio.friction.detector import analyze_project
     metrics, _ = analyze_project(project_path)
@@ -246,7 +268,7 @@ async def run_studio_benchmark(
         duration_seconds=duration,
         total_cost_usd=final_state.get("cost_usd", 0.0),
         total_tokens=final_state.get("tokens_used", 0),
-        test_coverage=metrics.coverage_pct,
+        test_coverage=_resolve_coverage(verified_coverage, metrics.coverage_pct),
         cyclomatic_complexity=metrics.max_cyclomatic_complexity,
         coupling_score=metrics.coupling_score,
         duplication_pct=metrics.duplication_pct,

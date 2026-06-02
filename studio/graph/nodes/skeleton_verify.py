@@ -46,6 +46,26 @@ async def skeleton_verify_node(state: GraphState, *, db, **_) -> dict:
         session.current_node = "skeleton_verify"
         await db.flush()
 
+    if slice_id is not None:
+        slice_complexity = None
+        from studio.db.models import Slice
+
+        slice_row = await db.get(Slice, slice_id)
+        if slice_row is not None and slice_row.cyclomatic_complexity is not None:
+            slice_complexity = float(slice_row.cyclomatic_complexity)
+        await emit_event(
+            db,
+            session_id,
+            "slice.verified",
+            data={
+                "slice_id": str(slice_id),
+                "passed": result.passed,
+                "coverage": result.coverage_pct,
+                "complexity": slice_complexity,
+            },
+            agent="verification",
+        )
+
     if result.passed:
         await emit_event(
             db,

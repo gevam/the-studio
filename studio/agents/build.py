@@ -160,9 +160,19 @@ async def run_build_agent(
 ) -> BuildAgentOutput:
     """Orchestrate the build agent: generate code and detect friction."""
 
+    from studio.ai.budget import BudgetExceeded
     from studio.db.models import DesignFriction, Slice
     from studio.events.emitter import emit_event
     from studio.observability.metrics import design_friction_total, slices_built_total
+
+    # Agent lifecycle start (§7.2)
+    await emit_event(
+        db,
+        input.session_id,
+        "agent.started",
+        data={"agent": "build_agent", "loop": "build_verify", "iteration": input.iteration},
+        agent="build_agent",
+    )
 
     if coding_agent is None:
         coding_agent = ClaudeCodeAgent()
@@ -242,6 +252,8 @@ async def run_build_agent(
             # Merge any additional friction the LLM detected
             llm_friction = _parse_llm_friction(llm_response.content)
             friction_reports.extend(llm_friction)
+        except BudgetExceeded:
+            raise  # hard stop must propagate, not be swallowed as a soft failure
         except Exception as exc:
             logger.warning("friction_llm_failed", error=str(exc))
 
@@ -291,6 +303,14 @@ async def run_build_agent(
         input.project_path,
         f"feat: {input.slice_type} - {input.slice_name}",
     )
+    if git_commit_hash:
+        await emit_event(
+            db,
+            input.session_id,
+            "git.committed",
+            data={"commit_hash": git_commit_hash, "files_changed": len(files_changed)},
+            agent="build_agent",
+        )
 
     # 9. Emit build.completed event
     await emit_event(

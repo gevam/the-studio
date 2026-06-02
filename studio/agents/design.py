@@ -56,6 +56,15 @@ async def run_design_agent(
     from studio.events.emitter import emit_event
     from studio.observability.metrics import design_revisions_total
 
+    # 0. Agent lifecycle start (§7.2)
+    await emit_event(
+        db,
+        input.session_id,
+        "agent.started",
+        data={"agent": "design_agent", "loop": "design_build", "iteration": input.iteration},
+        agent="design_agent",
+    )
+
     # 1. Load system prompt
     system_tpl = prompt_loader.load("design_agent", "system")
 

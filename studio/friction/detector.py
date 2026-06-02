@@ -8,10 +8,59 @@ from pathlib import Path
 from studio.friction.contract import CodeQualityMetrics, FrictionReport, severity_from_score
 
 
+# Directories that hold third-party / generated code, not the project's own source.
+# Scanning them (e.g. a project-local .venv) produces wildly inflated metrics —
+# a single vendored file overflowed slices.cyclomatic_complexity NUMERIC(5,2).
+_VENDORED_DIRS = {
+    ".venv", "venv", "env", ".env", "node_modules", ".git", "__pycache__",
+    "site-packages", "build", "dist", ".tox", ".mypy_cache", ".pytest_cache",
+    ".ruff_cache",
+}
+
+_DECISION_KEYWORDS = r"\b(if|elif|for|while|except|with|and|or|assert)\b"
+
+
+def _is_vendored(path: Path) -> bool:
+    """True if any path segment is a vendored/generated dir (or an egg-info)."""
+    return any(
+        part in _VENDORED_DIRS or part.endswith(".egg-info") for part in path.parts
+    )
+
+
 def _cyclomatic_complexity(source: str) -> int:
-    """Estimate cyclomatic complexity by counting decision points."""
-    keywords = r"\b(if|elif|else|for|while|try|except|finally|with|and|or|assert)\b"
-    return len(re.findall(keywords, source)) + 1
+    """Maximum McCabe cyclomatic complexity across the functions in a module.
+
+    Complexity is per-function (1 + decision points); we return the worst
+    function's score, which is the meaningful signal. Counting decision points
+    across an entire file conflates unrelated functions and inflates the value.
+    Falls back to a module-wide keyword count if the source can't be parsed.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return len(re.findall(_DECISION_KEYWORDS, source)) + 1
+
+    decision_nodes = (
+        ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,
+        ast.With, ast.AsyncWith, ast.IfExp, ast.comprehension, ast.Assert,
+    )
+    functions = [
+        n for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    if not functions:
+        return len(re.findall(_DECISION_KEYWORDS, source)) + 1
+
+    max_complexity = 1
+    for func in functions:
+        complexity = 1
+        for node in ast.walk(func):
+            if isinstance(node, decision_nodes):
+                complexity += 1
+            elif isinstance(node, ast.BoolOp):
+                complexity += len(node.values) - 1
+        max_complexity = max(max_complexity, complexity)
+    return max_complexity
 
 
 def _count_imports(source: str, module_prefix: str) -> int:
@@ -57,7 +106,7 @@ def _count_mock_usage(source: str) -> int:
 
 def analyze_project(project_path: Path) -> tuple[CodeQualityMetrics, list[FrictionReport]]:
     """Run static analysis on a project directory and return metrics + friction reports."""
-    py_files = list(project_path.rglob("*.py"))
+    py_files = [f for f in project_path.rglob("*.py") if not _is_vendored(f)]
     test_files = [f for f in py_files if "test" in f.name]
     src_files = [f for f in py_files if "test" not in f.name and f.name != "conftest.py"]
 

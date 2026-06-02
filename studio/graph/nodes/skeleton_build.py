@@ -11,6 +11,16 @@ from studio.graph.state import GraphState
 
 logger = structlog.get_logger(__name__)
 
+# Slice quality columns are NUMERIC(5, 2): |value| < 1000. Clamp before persisting
+# so a runaway metric degrades the recorded number instead of crashing the graph.
+_METRIC_MAX = 999.99
+
+
+def _clamp_metric(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return max(-_METRIC_MAX, min(round(float(value), 2), _METRIC_MAX))
+
 
 async def skeleton_build_node(state: GraphState, *, db, llm, prompt_loader, **_) -> dict:
     """Run the Build Agent to build the walking skeleton."""
@@ -77,10 +87,10 @@ async def skeleton_build_node(state: GraphState, *, db, llm, prompt_loader, **_)
     # Update slice with quality metrics
     slice_row.status = "done"
     if output.metrics:
-        slice_row.test_coverage = output.metrics.coverage_pct
-        slice_row.cyclomatic_complexity = output.metrics.max_cyclomatic_complexity
-        slice_row.coupling_score = output.metrics.coupling_score
-        slice_row.duplication_pct = output.metrics.duplication_pct
+        slice_row.test_coverage = _clamp_metric(output.metrics.coverage_pct)
+        slice_row.cyclomatic_complexity = _clamp_metric(output.metrics.max_cyclomatic_complexity)
+        slice_row.coupling_score = _clamp_metric(output.metrics.coupling_score)
+        slice_row.duplication_pct = _clamp_metric(output.metrics.duplication_pct)
     await db.flush()
 
     # Update session

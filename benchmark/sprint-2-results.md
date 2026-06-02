@@ -7,29 +7,735 @@
 
 | Metric | Baseline (plain Claude) | Studio |
 |--------|------------------------|--------|
-| Duration | 325.5s | 31.1s |
-| Cost | $1.2626 | $0.0000 |
-| Test coverage | 0.0% | 0.0% |
-| Cyclomatic complexity | 7.0 | 0.0 |
-| Duplication % | 33.0% | 0.0% |
-| Friction items found | 1 | 0 |
-| Friction items resolved | 0 | 0 |
-| Design revisions | 0 | 0 |
+| Duration | 270.1s | 12244.8s |
+| Cost | $0.5106 | $0.0000 |
+| Test coverage | 0.0% | 95.0% |
+| Cyclomatic complexity | 7.0 | 3.0 |
+| Duplication % | 33.0% | 31.9% |
+| Friction items found | 1 | 60 |
+| Friction items resolved | 0 | 60 |
+| Design revisions | 0 | 56 |
 
 ## Studio wins
+- coverage
 - complexity
 - coupling
 - duplication
+- design_feedback_loop
 
 ## Errors
-Studio: no valid JSON object found in response
+Studio: Recursion limit of 120 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
 
 ## Event log (DoD proof — three loops + both human gates)
 
 ```
-session_id = ffabd343-4c6a-4c26-94f6-b0fb2e95ad79
+session_id = 449c523b-73e8-4fa6-9ed8-4cbb224fd028
 
 seq | event_type
 --- | ----------
   1 | session.created
+  2 | agent.started
+  3 | agent.llm_call
+  4 | agent.llm_response
+  5 | ai.feedback_recorded
+  6 | design.revised
+  7 | agent.started
+  8 | agent.llm_call
+  9 | agent.llm_response
+ 10 | ai.feedback_recorded
+ 11 | agent.completed
+ 12 | agent.started
+ 13 | agent.llm_call
+ 14 | agent.llm_response
+ 15 | ai.feedback_recorded
+ 16 | design.revised
+ 17 | agent.started
+ 18 | agent.llm_call
+ 19 | agent.llm_response
+ 20 | ai.feedback_recorded
+ 21 | agent.completed
+ 22 | agent.started
+ 23 | agent.llm_call
+ 24 | agent.llm_response
+ 25 | ai.feedback_recorded
+ 26 | design.revised
+ 27 | agent.started
+ 28 | agent.llm_call
+ 29 | agent.llm_response
+ 30 | ai.feedback_recorded
+ 31 | agent.completed
+ 32 | slice.started
+ 33 | agent.started
+ 34 | agent.llm_call
+ 35 | agent.llm_response
+ 36 | ai.feedback_recorded
+ 37 | design_friction.reported
+ 38 | git.committed
+ 39 | agent.completed
+ 40 | slice.built
+ 41 | verification.result
+ 42 | slice.verified
+ 43 | skeleton.validated
+ 44 | human.checkpoint
+ 45 | human.decision
+ 46 | agent.started
+ 47 | agent.llm_call
+ 48 | agent.llm_response
+ 49 | ai.feedback_recorded
+ 50 | agent.completed
+ 51 | agent.started
+ 52 | agent.llm_call
+ 53 | agent.llm_response
+ 54 | ai.feedback_recorded
+ 55 | design_friction.reported
+ 56 | agent.completed
+ 57 | agent.started
+ 58 | agent.llm_call
+ 59 | agent.llm_response
+ 60 | ai.feedback_recorded
+ 61 | design.revised
+ 62 | agent.started
+ 63 | agent.llm_call
+ 64 | agent.llm_response
+ 65 | ai.feedback_recorded
+ 66 | design_friction.reported
+ 67 | git.committed
+ 68 | agent.completed
+ 69 | agent.started
+ 70 | agent.llm_call
+ 71 | agent.llm_response
+ 72 | ai.feedback_recorded
+ 73 | design.revised
+ 74 | agent.started
+ 75 | agent.llm_call
+ 76 | agent.llm_response
+ 77 | ai.feedback_recorded
+ 78 | design_friction.reported
+ 79 | git.committed
+ 80 | agent.completed
+ 81 | agent.started
+ 82 | agent.llm_call
+ 83 | agent.llm_response
+ 84 | ai.feedback_recorded
+ 85 | design.revised
+ 86 | agent.started
+ 87 | agent.llm_call
+ 88 | agent.llm_response
+ 89 | ai.feedback_recorded
+ 90 | design_friction.reported
+ 91 | git.committed
+ 92 | agent.completed
+ 93 | agent.started
+ 94 | agent.llm_call
+ 95 | agent.llm_response
+ 96 | ai.feedback_recorded
+ 97 | design.revised
+ 98 | agent.started
+ 99 | agent.llm_call
+100 | agent.llm_response
+101 | ai.feedback_recorded
+102 | design_friction.reported
+103 | design_friction.reported
+104 | design_friction.reported
+105 | design_friction.reported
+106 | git.committed
+107 | agent.completed
+108 | agent.started
+109 | agent.llm_call
+110 | agent.llm_response
+111 | ai.feedback_recorded
+112 | design.revised
+113 | agent.started
+114 | agent.llm_call
+115 | agent.llm_response
+116 | ai.feedback_recorded
+117 | design_friction.reported
+118 | git.committed
+119 | agent.completed
+120 | agent.started
+121 | agent.llm_call
+122 | agent.llm_response
+123 | ai.feedback_recorded
+124 | design.revised
+125 | agent.started
+126 | agent.llm_call
+127 | agent.llm_response
+128 | ai.feedback_recorded
+129 | design_friction.reported
+130 | git.committed
+131 | agent.completed
+132 | agent.started
+133 | agent.llm_call
+134 | agent.llm_response
+135 | ai.feedback_recorded
+136 | design.revised
+137 | agent.started
+138 | agent.llm_call
+139 | agent.llm_response
+140 | ai.feedback_recorded
+141 | design_friction.reported
+142 | git.committed
+143 | agent.completed
+144 | agent.started
+145 | agent.llm_call
+146 | agent.llm_response
+147 | ai.feedback_recorded
+148 | design.revised
+149 | agent.started
+150 | agent.llm_call
+151 | agent.llm_response
+152 | ai.feedback_recorded
+153 | design_friction.reported
+154 | git.committed
+155 | agent.completed
+156 | agent.started
+157 | agent.llm_call
+158 | agent.llm_response
+159 | ai.feedback_recorded
+160 | design.revised
+161 | agent.started
+162 | agent.llm_call
+163 | agent.llm_response
+164 | ai.feedback_recorded
+165 | design_friction.reported
+166 | git.committed
+167 | agent.completed
+168 | agent.started
+169 | agent.llm_call
+170 | agent.llm_response
+171 | ai.feedback_recorded
+172 | design.revised
+173 | agent.started
+174 | agent.llm_call
+175 | agent.llm_response
+176 | ai.feedback_recorded
+177 | design_friction.reported
+178 | agent.completed
+179 | agent.started
+180 | agent.llm_call
+181 | agent.llm_response
+182 | ai.feedback_recorded
+183 | design.revised
+184 | agent.started
+185 | agent.llm_call
+186 | agent.llm_response
+187 | ai.feedback_recorded
+188 | design_friction.reported
+189 | git.committed
+190 | agent.completed
+191 | agent.started
+192 | agent.llm_call
+193 | agent.llm_response
+194 | ai.feedback_recorded
+195 | design.revised
+196 | agent.started
+197 | agent.llm_call
+198 | agent.llm_response
+199 | ai.feedback_recorded
+200 | design_friction.reported
+201 | git.committed
+202 | agent.completed
+203 | agent.started
+204 | agent.llm_call
+205 | agent.llm_response
+206 | ai.feedback_recorded
+207 | design.revised
+208 | agent.started
+209 | agent.llm_call
+210 | agent.llm_response
+211 | ai.feedback_recorded
+212 | design_friction.reported
+213 | git.committed
+214 | agent.completed
+215 | agent.started
+216 | agent.llm_call
+217 | agent.llm_response
+218 | ai.feedback_recorded
+219 | design.revised
+220 | agent.started
+221 | agent.llm_call
+222 | agent.llm_response
+223 | ai.feedback_recorded
+224 | design_friction.reported
+225 | git.committed
+226 | agent.completed
+227 | agent.started
+228 | agent.llm_call
+229 | agent.llm_response
+230 | ai.feedback_recorded
+231 | design.revised
+232 | agent.started
+233 | agent.llm_call
+234 | agent.llm_response
+235 | ai.feedback_recorded
+236 | design_friction.reported
+237 | git.committed
+238 | agent.completed
+239 | agent.started
+240 | agent.llm_call
+241 | agent.llm_response
+242 | ai.feedback_recorded
+243 | design.revised
+244 | agent.started
+245 | agent.llm_call
+246 | agent.llm_response
+247 | ai.feedback_recorded
+248 | design_friction.reported
+249 | git.committed
+250 | agent.completed
+251 | agent.started
+252 | agent.llm_call
+253 | agent.llm_response
+254 | ai.feedback_recorded
+255 | design.revised
+256 | agent.started
+257 | agent.llm_call
+258 | agent.llm_response
+259 | ai.feedback_recorded
+260 | design_friction.reported
+261 | git.committed
+262 | agent.completed
+263 | agent.started
+264 | agent.llm_call
+265 | agent.llm_response
+266 | ai.feedback_recorded
+267 | design.revised
+268 | agent.started
+269 | agent.llm_call
+270 | agent.llm_response
+271 | ai.feedback_recorded
+272 | design_friction.reported
+273 | agent.completed
+274 | agent.started
+275 | agent.llm_call
+276 | agent.llm_response
+277 | ai.feedback_recorded
+278 | design.revised
+279 | agent.started
+280 | agent.llm_call
+281 | agent.llm_response
+282 | ai.feedback_recorded
+283 | design_friction.reported
+284 | git.committed
+285 | agent.completed
+286 | agent.started
+287 | agent.llm_call
+288 | agent.llm_response
+289 | ai.feedback_recorded
+290 | design.revised
+291 | agent.started
+292 | agent.llm_call
+293 | agent.llm_response
+294 | ai.feedback_recorded
+295 | design_friction.reported
+296 | git.committed
+297 | agent.completed
+298 | agent.started
+299 | agent.llm_call
+300 | agent.llm_response
+301 | ai.feedback_recorded
+302 | design.revised
+303 | agent.started
+304 | agent.llm_call
+305 | agent.llm_response
+306 | ai.feedback_recorded
+307 | design_friction.reported
+308 | git.committed
+309 | agent.completed
+310 | agent.started
+311 | agent.llm_call
+312 | agent.llm_response
+313 | ai.feedback_recorded
+314 | design.revised
+315 | agent.started
+316 | agent.llm_call
+317 | agent.llm_response
+318 | ai.feedback_recorded
+319 | design_friction.reported
+320 | git.committed
+321 | agent.completed
+322 | agent.started
+323 | agent.llm_call
+324 | agent.llm_response
+325 | ai.feedback_recorded
+326 | design.revised
+327 | agent.started
+328 | agent.llm_call
+329 | agent.llm_response
+330 | ai.feedback_recorded
+331 | design_friction.reported
+332 | git.committed
+333 | agent.completed
+334 | agent.started
+335 | agent.llm_call
+336 | agent.llm_response
+337 | ai.feedback_recorded
+338 | design.revised
+339 | agent.started
+340 | agent.llm_call
+341 | agent.llm_response
+342 | ai.feedback_recorded
+343 | design_friction.reported
+344 | git.committed
+345 | agent.completed
+346 | agent.started
+347 | agent.llm_call
+348 | agent.llm_response
+349 | ai.feedback_recorded
+350 | design.revised
+351 | agent.started
+352 | agent.llm_call
+353 | agent.llm_response
+354 | ai.feedback_recorded
+355 | design_friction.reported
+356 | git.committed
+357 | agent.completed
+358 | agent.started
+359 | agent.llm_call
+360 | agent.llm_response
+361 | ai.feedback_recorded
+362 | design.revised
+363 | agent.started
+364 | agent.llm_call
+365 | agent.llm_response
+366 | ai.feedback_recorded
+367 | design_friction.reported
+368 | git.committed
+369 | agent.completed
+370 | agent.started
+371 | agent.llm_call
+372 | agent.llm_response
+373 | ai.feedback_recorded
+374 | design.revised
+375 | agent.started
+376 | agent.llm_call
+377 | agent.llm_response
+378 | ai.feedback_recorded
+379 | design_friction.reported
+380 | git.committed
+381 | agent.completed
+382 | agent.started
+383 | agent.llm_call
+384 | agent.llm_response
+385 | ai.feedback_recorded
+386 | design.revised
+387 | agent.started
+388 | agent.llm_call
+389 | agent.llm_response
+390 | ai.feedback_recorded
+391 | design_friction.reported
+392 | git.committed
+393 | agent.completed
+394 | agent.started
+395 | agent.llm_call
+396 | agent.llm_response
+397 | ai.feedback_recorded
+398 | design.revised
+399 | agent.started
+400 | agent.llm_call
+401 | agent.llm_response
+402 | ai.feedback_recorded
+403 | design_friction.reported
+404 | git.committed
+405 | agent.completed
+406 | agent.started
+407 | agent.llm_call
+408 | agent.llm_response
+409 | ai.feedback_recorded
+410 | design.revised
+411 | agent.started
+412 | agent.llm_call
+413 | agent.llm_response
+414 | ai.feedback_recorded
+415 | design_friction.reported
+416 | git.committed
+417 | agent.completed
+418 | agent.started
+419 | agent.llm_call
+420 | agent.llm_response
+421 | ai.feedback_recorded
+422 | design.revised
+423 | agent.started
+424 | agent.llm_call
+425 | agent.llm_response
+426 | ai.feedback_recorded
+427 | design_friction.reported
+428 | agent.completed
+429 | agent.started
+430 | agent.llm_call
+431 | agent.llm_response
+432 | ai.feedback_recorded
+433 | design.revised
+434 | agent.started
+435 | agent.llm_call
+436 | agent.llm_response
+437 | ai.feedback_recorded
+438 | design_friction.reported
+439 | git.committed
+440 | agent.completed
+441 | agent.started
+442 | agent.llm_call
+443 | agent.llm_response
+444 | ai.feedback_recorded
+445 | design.revised
+446 | agent.started
+447 | agent.llm_call
+448 | agent.llm_response
+449 | ai.feedback_recorded
+450 | design_friction.reported
+451 | git.committed
+452 | agent.completed
+453 | agent.started
+454 | agent.llm_call
+455 | agent.llm_response
+456 | ai.feedback_recorded
+457 | design.revised
+458 | agent.started
+459 | agent.llm_call
+460 | agent.llm_response
+461 | ai.feedback_recorded
+462 | design_friction.reported
+463 | git.committed
+464 | agent.completed
+465 | agent.started
+466 | agent.llm_call
+467 | agent.llm_response
+468 | ai.feedback_recorded
+469 | design.revised
+470 | agent.started
+471 | agent.llm_call
+472 | agent.llm_response
+473 | ai.feedback_recorded
+474 | design_friction.reported
+475 | git.committed
+476 | agent.completed
+477 | agent.started
+478 | agent.llm_call
+479 | agent.llm_response
+480 | ai.feedback_recorded
+481 | design.revised
+482 | agent.started
+483 | agent.llm_call
+484 | agent.llm_response
+485 | ai.feedback_recorded
+486 | design_friction.reported
+487 | git.committed
+488 | agent.completed
+489 | agent.started
+490 | agent.llm_call
+491 | agent.llm_response
+492 | ai.feedback_recorded
+493 | design.revised
+494 | agent.started
+495 | agent.llm_call
+496 | agent.llm_response
+497 | ai.feedback_recorded
+498 | design_friction.reported
+499 | git.committed
+500 | agent.completed
+501 | agent.started
+502 | agent.llm_call
+503 | agent.llm_response
+504 | ai.feedback_recorded
+505 | design.revised
+506 | agent.started
+507 | agent.llm_call
+508 | agent.llm_response
+509 | ai.feedback_recorded
+510 | design_friction.reported
+511 | agent.completed
+512 | agent.started
+513 | agent.llm_call
+514 | agent.llm_response
+515 | ai.feedback_recorded
+516 | design.revised
+517 | agent.started
+518 | agent.llm_call
+519 | agent.llm_response
+520 | ai.feedback_recorded
+521 | design_friction.reported
+522 | git.committed
+523 | agent.completed
+524 | agent.started
+525 | agent.llm_call
+526 | agent.llm_response
+527 | ai.feedback_recorded
+528 | design.revised
+529 | agent.started
+530 | agent.llm_call
+531 | agent.llm_response
+532 | ai.feedback_recorded
+533 | design_friction.reported
+534 | git.committed
+535 | agent.completed
+536 | agent.started
+537 | agent.llm_call
+538 | agent.llm_response
+539 | ai.feedback_recorded
+540 | design.revised
+541 | agent.started
+542 | agent.llm_call
+543 | agent.llm_response
+544 | ai.feedback_recorded
+545 | design_friction.reported
+546 | git.committed
+547 | agent.completed
+548 | agent.started
+549 | agent.llm_call
+550 | agent.llm_response
+551 | ai.feedback_recorded
+552 | design.revised
+553 | agent.started
+554 | agent.llm_call
+555 | agent.llm_response
+556 | ai.feedback_recorded
+557 | design_friction.reported
+558 | git.committed
+559 | agent.completed
+560 | agent.started
+561 | agent.llm_call
+562 | agent.llm_response
+563 | ai.feedback_recorded
+564 | design.revised
+565 | agent.started
+566 | agent.llm_call
+567 | agent.llm_response
+568 | ai.feedback_recorded
+569 | design_friction.reported
+570 | git.committed
+571 | agent.completed
+572 | agent.started
+573 | agent.llm_call
+574 | agent.llm_response
+575 | ai.feedback_recorded
+576 | design.revised
+577 | agent.started
+578 | session.budget_warning
+579 | agent.llm_call
+580 | agent.llm_response
+581 | ai.feedback_recorded
+582 | design_friction.reported
+583 | design_friction.reported
+584 | design_friction.reported
+585 | design_friction.reported
+586 | git.committed
+587 | agent.completed
+588 | agent.started
+589 | session.budget_warning
+590 | agent.llm_call
+591 | agent.llm_response
+592 | ai.feedback_recorded
+593 | design.revised
+594 | agent.started
+595 | session.budget_warning
+596 | agent.llm_call
+597 | agent.llm_response
+598 | ai.feedback_recorded
+599 | design_friction.reported
+600 | git.committed
+601 | agent.completed
+602 | agent.started
+603 | session.budget_warning
+604 | agent.llm_call
+605 | agent.llm_response
+606 | ai.feedback_recorded
+607 | design.revised
+608 | agent.started
+609 | session.budget_warning
+610 | agent.llm_call
+611 | agent.llm_response
+612 | ai.feedback_recorded
+613 | design_friction.reported
+614 | git.committed
+615 | agent.completed
+616 | agent.started
+617 | session.budget_warning
+618 | agent.llm_call
+619 | agent.llm_response
+620 | ai.feedback_recorded
+621 | design.revised
+622 | agent.started
+623 | session.budget_warning
+624 | agent.llm_call
+625 | agent.llm_response
+626 | ai.feedback_recorded
+627 | design_friction.reported
+628 | git.committed
+629 | agent.completed
+630 | agent.started
+631 | session.budget_warning
+632 | agent.llm_call
+633 | agent.llm_response
+634 | ai.feedback_recorded
+635 | design.revised
+636 | agent.started
+637 | session.budget_warning
+638 | agent.llm_call
+639 | agent.llm_response
+640 | ai.feedback_recorded
+641 | design_friction.reported
+642 | agent.completed
+643 | agent.started
+644 | session.budget_warning
+645 | agent.llm_call
+646 | agent.llm_response
+647 | ai.feedback_recorded
+648 | design.revised
+649 | agent.started
+650 | session.budget_warning
+651 | agent.llm_call
+652 | agent.llm_response
+653 | ai.feedback_recorded
+654 | design_friction.reported
+655 | git.committed
+656 | agent.completed
+657 | agent.started
+658 | session.budget_warning
+659 | agent.llm_call
+660 | agent.llm_response
+661 | ai.feedback_recorded
+662 | design.revised
+663 | agent.started
+664 | session.budget_warning
+665 | agent.llm_call
+666 | agent.llm_response
+667 | ai.feedback_recorded
+668 | design_friction.reported
+669 | git.committed
+670 | agent.completed
+671 | agent.started
+672 | session.budget_warning
+673 | agent.llm_call
+674 | agent.llm_response
+675 | ai.feedback_recorded
+676 | design.revised
+677 | agent.started
+678 | session.budget_warning
+679 | agent.llm_call
+680 | agent.llm_response
+681 | ai.feedback_recorded
+682 | design_friction.reported
+683 | git.committed
+684 | agent.completed
+685 | agent.started
+686 | session.budget_warning
+687 | agent.llm_call
+688 | agent.llm_response
+689 | ai.feedback_recorded
+690 | design.revised
+691 | agent.started
+692 | session.budget_warning
+693 | agent.llm_call
+694 | agent.llm_response
+695 | ai.feedback_recorded
+696 | design_friction.reported
+697 | git.committed
+698 | agent.completed
+699 | agent.started
+700 | session.budget_warning
+701 | agent.llm_call
+702 | agent.llm_response
+703 | ai.feedback_recorded
+704 | design.revised
 ```

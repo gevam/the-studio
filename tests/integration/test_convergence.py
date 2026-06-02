@@ -53,7 +53,9 @@ def _loader():
 
 
 @pytest.mark.asyncio
-async def test_session_converges_despite_always_complaining_agents(session_factory, tmp_path, monkeypatch):
+async def test_session_converges_despite_always_complaining_agents(
+    session_factory, tmp_path, monkeypatch,
+):
     project = tmp_path / "proj"
     project.mkdir()
     for a in (["init", "-q"], ["config", "user.email", "t@e"], ["config", "user.name", "t"]):

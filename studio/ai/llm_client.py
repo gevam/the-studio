@@ -241,7 +241,12 @@ class ClaudeCLIProvider:
     ]
 
     def __init__(self) -> None:
+        import tempfile
+
         self._cli_path = self._find_cli()
+        # Run the agent CLI in an isolated empty dir so it cannot read the host
+        # repo and wander off-task (it is a coding agent, not a bare model).
+        self._cwd = tempfile.mkdtemp(prefix="studio-cli-provider-")
 
     def _find_cli(self) -> str:
         import shutil
@@ -300,6 +305,7 @@ class ClaudeCLIProvider:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=self._cwd,
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(input=full_prompt.encode()), timeout=900
@@ -357,12 +363,13 @@ class ClaudeCLIProvider:
         # output, kept for offline (Max-subscription) runs.
         schema_json = json.dumps(schema.model_json_schema())
         instruction = (
-            f"{system}\n\nReturn ONLY a JSON object that validates against this JSON "
-            f"Schema. No markdown, no prose:\n{schema_json}"
+            f"{system}\n\nOutput ONLY a single JSON object matching this schema. "
+            "Start your reply with { and output nothing else — no preamble, no "
+            f"explanation, no markdown code fences:\n{schema_json}"
         )
         response = await self.complete(
             messages, system=instruction, max_tokens=max_tokens,
-            temperature=temperature, model=model, prefill="{",
+            temperature=temperature, model=model,
         )
         data = _extract_json_object(response.content)
         return StructuredResponse(

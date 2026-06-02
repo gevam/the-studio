@@ -117,15 +117,23 @@ def verify_router(state: GraphState) -> str:
 
 
 def ux_review_router(state: GraphState) -> str:
+    """UX issue → design (capped per slice), else proceed to the reviewer."""
     if state.get("error"):
         return "complete"
-    return "design_agent" if state.get("ux_issues_found") else "reviewer"
+    cap = (state.get("config") or {}).get("max_ux_review_loops", 2)
+    if state.get("ux_issues_found") and state.get("ux_review_attempts", 0) < cap:
+        return "design_agent"
+    return "reviewer"
 
 
 def reviewer_router(state: GraphState) -> str:
+    """Reviewer reject → rebuild (capped per slice), else the slice is done."""
     if state.get("error"):
         return "complete"
-    return "build_agent" if state.get("reviewer_rejected") else "slice_done"
+    cap = (state.get("config") or {}).get("max_reviewer_loops", 2)
+    if state.get("reviewer_rejected") and state.get("reviewer_attempts", 0) < cap:
+        return "build_agent"
+    return "slice_done"
 
 
 def slice_done_router(state: GraphState) -> str:

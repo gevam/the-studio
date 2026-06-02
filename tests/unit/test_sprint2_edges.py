@@ -55,3 +55,16 @@ def test_ux_review_and_reviewer_and_slice_done_routers():
     assert reviewer_router({"reviewer_rejected": False}) == "slice_done"
     assert slice_done_router({"remaining_slice_ids": ["x"]}) == "slice_plan"
     assert slice_done_router({"remaining_slice_ids": []}) == "human_gate_ship"
+
+
+def test_review_loops_are_capped():
+    cfg = {"config": {"max_ux_review_loops": 2, "max_reviewer_loops": 2}}
+    # under cap → loop back; at cap → proceed forward (forces convergence)
+    ux_under = {**cfg, "ux_issues_found": True, "ux_review_attempts": 1}
+    ux_cap = {**cfg, "ux_issues_found": True, "ux_review_attempts": 2}
+    rev_under = {**cfg, "reviewer_rejected": True, "reviewer_attempts": 1}
+    rev_cap = {**cfg, "reviewer_rejected": True, "reviewer_attempts": 2}
+    assert ux_review_router(ux_under) == "design_agent"
+    assert ux_review_router(ux_cap) == "reviewer"
+    assert reviewer_router(rev_under) == "build_agent"
+    assert reviewer_router(rev_cap) == "slice_done"

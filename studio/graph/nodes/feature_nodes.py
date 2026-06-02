@@ -208,6 +208,7 @@ async def ux_review_node(state: GraphState, *, db, llm, prompt_loader, **_) -> d
     return {
         "current_node": "ux_review",
         "ux_issues_found": out.review.needs_design_revision,
+        "ux_review_attempts": state.get("ux_review_attempts", 0) + 1,
         "tokens_used": state.get("tokens_used", 0) + out.tokens_used,
         "cost_usd": state.get("cost_usd", 0.0) + out.cost_usd,
     }
@@ -245,6 +246,7 @@ async def reviewer_node(state: GraphState, *, db, llm, prompt_loader, **_) -> di
     return {
         "current_node": "reviewer",
         "reviewer_rejected": not result.output.passed,
+        "reviewer_attempts": state.get("reviewer_attempts", 0) + 1,
         "tokens_used": state.get("tokens_used", 0) + result.tokens_used,
         "cost_usd": state.get("cost_usd", 0.0) + result.cost_usd,
     }
@@ -266,4 +268,6 @@ async def slice_done_node(state: GraphState, *, db, **_) -> dict:
         # reset per-slice loop budgets for the next slice
         "verify_retries": 0,
         "build_iterations": 0,
+        "ux_review_attempts": 0,
+        "reviewer_attempts": 0,
     }

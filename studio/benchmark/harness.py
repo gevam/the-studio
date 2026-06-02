@@ -225,7 +225,7 @@ async def run_studio_benchmark(
         compiled = build_sprint2_graph(
             db_factory=AsyncSessionLocal, llm=llm, prompt_loader=prompt_loader,
         )
-        invoke_config = {"recursion_limit": 120}
+        invoke_config = {"recursion_limit": 200}
     else:
         compiled = build_sprint1_graph(
             db_factory=AsyncSessionLocal, llm=llm, prompt_loader=prompt_loader,

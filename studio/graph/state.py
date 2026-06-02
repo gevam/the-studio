@@ -36,7 +36,9 @@ class GraphState(TypedDict, total=False):
     slices_planned: bool
     design_ux_needs_revision: bool
     ux_issues_found: bool
+    ux_review_attempts: int
     reviewer_rejected: bool
+    reviewer_attempts: int
     human_gate_action: str | None  # "approve" | "reject"
     experience_metric: dict
 

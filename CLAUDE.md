@@ -39,6 +39,15 @@ Foundations before agents. Design⇄Build loop before UX/Reviewer. Loops before 
 - #5 (sandbox): `--network none`, 2GB/2CPU, 5-min timeout.
 - _Add new resolutions here as they're decided._
 
+## Deferred decisions (tracked for Sprint 2)
+From the PR #2 code review. Behavior NOT changed yet — decide before building on it:
+- **Friction resolution semantics:** today friction is marked `resolved` when the design agent *produces a revision* in response (resolution-on-revision), not when re-verification confirms the friction is gone (resolution-on-reverify). All friction IDs passed to the agent are resolved regardless of what the LLM addressed — partial resolution isn't representable. Decide which semantics we want; it affects the resolution-rate metric. (See `tests/unit/agents/test_design.py`.)
+- **Verify→Build vs Verify→Design edge:** verification failures currently route to the Design agent (Sprint 1 thesis). §4.6 says deterministic-check failures route to Build. Split the edges when the Reviewer lands.
+- **Provider registry:** `LLMClient` binds one provider at construction. §4.4 Reviewer needs a different-family model → add `OpenAIProvider` + per-agent `agent → (provider, model)` routing (Sprint 2 first task).
+- **Structured output:** agents prompt-and-parse JSON. Reviewer (§4.4) needs Pydantic structured output / tool-calling — add to the provider layer before the Reviewer.
+- **Digest token cap (§9.1):** `generate_digest` is not length-enforced; add an `estimate_tokens` + truncate before complex designs.
+- **`--strict` mypy in verification (§4.6)** and **cache-token cost accounting (§9.2):** track and tighten.
+
 ## Things to flag, never assume
 Open questions from §13 still pending. If you hit one, stop and ask in the PR.
 

@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy import select, text
 
-from studio.ai.llm_client import LLMClient, LLMResponse
+from studio.ai.llm_client import LLMClient, LLMResponse, StructuredResponse
 from studio.ai.prompt_loader import PromptTemplate
 from studio.db.models import (
     DesignRevision,
@@ -29,19 +29,28 @@ from studio.db.models import (
     Requirement,
     Session,
 )
+from studio.design.schema import LivingDesign
 from studio.graph.builder import build_sprint1_graph
 
-_DESIGN_JSON = '{"modules": [{"name": "cli", "responsibility": "x"}]}'
 
+def _real_client_with_mock_provider():
+    """Real LLMClient (so budget + ai_feedback logic runs) with a stubbed provider.
 
-def _real_client_with_mock_provider(design_json: str = _DESIGN_JSON):
-    """Real LLMClient (so budget + ai_feedback logic runs) with a stubbed provider."""
+    Stubs both text and structured completion since the design agent now uses
+    native structured output.
+    """
     client = LLMClient(provider="claude_cli")
     client._provider = MagicMock()
     client._provider.complete = AsyncMock(
         return_value=LLMResponse(
-            content=design_json, tokens_in=20, tokens_out=10,
+            content="{}", tokens_in=20, tokens_out=10,
             cost_usd=0.002, model="m", latency_ms=10,
+        )
+    )
+    client._provider.complete_structured = AsyncMock(
+        return_value=StructuredResponse(
+            parsed=LivingDesign(modules=[{"name": "cli", "responsibility": "x"}]),
+            tokens_in=20, tokens_out=10, cost_usd=0.002, model="m", latency_ms=10,
         )
     )
     return client

@@ -21,16 +21,17 @@ import pytest
 from sqlalchemy import select
 
 from studio.agents.design import DesignAgentInput, run_design_agent
-from studio.ai.llm_client import LLMResponse
+from studio.ai.llm_client import StructuredResponse
 from studio.ai.prompt_loader import PromptTemplate
 from studio.db.models import DesignFriction, DesignRevision, Session
+from studio.design.schema import LivingDesign
 
 
 def _mock_llm():
     llm = AsyncMock()
-    llm.complete = AsyncMock(
-        return_value=LLMResponse(
-            content='{"modules": [{"name": "cli", "responsibility": "entry point"}]}',
+    llm.complete_structured = AsyncMock(
+        return_value=StructuredResponse(
+            parsed=LivingDesign(modules=[{"name": "cli", "responsibility": "entry point"}]),
             tokens_in=10, tokens_out=5, cost_usd=0.001, model="m", latency_ms=10,
         )
     )

@@ -36,6 +36,7 @@ Foundations before agents. Design⇄Build loop before UX/Reviewer. Loops before 
 ## Open questions resolved so far
 - #1 (coding agent interface): `claude` CLI subprocess, abstracted behind `CodingAgent` Protocol.
 - #3 (auth): API key if present, else `claude` CLI Max auth.
+- #4 (Reviewer model): different family from the other agents — default `openai`/`gpt-4o` (config: `reviewer_provider`/`reviewer_model`). When `OPENAI_API_KEY` is absent it falls back to `claude_cli` on `claude-opus-4-5` (still a distinct model from the Sonnet agents). Routing lives in `studio/ai/registry.py`.
 - #5 (sandbox): `--network none`, 2GB/2CPU, 5-min timeout.
 - _Add new resolutions here as they're decided._
 

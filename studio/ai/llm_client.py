@@ -21,11 +21,15 @@ _COST_PER_TOKEN_IN: dict[str, float] = {
     "claude-sonnet-4-6": 3.00 / 1_000_000,
     "claude-opus-4-5": 15.00 / 1_000_000,
     "claude-haiku-4-5": 0.25 / 1_000_000,
+    "gpt-4o": 2.50 / 1_000_000,
+    "gpt-4o-mini": 0.15 / 1_000_000,
 }
 _COST_PER_TOKEN_OUT: dict[str, float] = {
     "claude-sonnet-4-6": 15.00 / 1_000_000,
     "claude-opus-4-5": 75.00 / 1_000_000,
     "claude-haiku-4-5": 1.25 / 1_000_000,
+    "gpt-4o": 10.00 / 1_000_000,
+    "gpt-4o-mini": 0.60 / 1_000_000,
 }
 
 _DEFAULT_COST_IN = 3.00 / 1_000_000
@@ -245,29 +249,91 @@ class ClaudeCLIProvider:
         )
 
 
-class LLMClient:
-    """Unified LLM client that records to DB, emits events, and tracks metrics."""
+class OpenAIProvider:
+    """LLM provider using OpenAI's AsyncOpenAI SDK (for the Reviewer's different family)."""
 
-    def __init__(self, provider: str = "auto", budget_enforcer=None) -> None:
+    def __init__(self) -> None:
+        from studio.config import settings
+
+        api_key = settings.openai_api_key or os.environ.get("OPENAI_API_KEY") or ""
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is not set; cannot use the OpenAI provider.")
+        try:
+            from openai import AsyncOpenAI  # type: ignore[import]
+        except ImportError as exc:
+            raise ImportError("openai package not installed") from exc
+
+        self._client = AsyncOpenAI(api_key=api_key)
+
+    async def complete(
+        self,
+        messages: list[dict],
+        *,
+        system: str,
+        max_tokens: int,
+        temperature: float,
+        model: str,
+        prefill: str = "",
+    ) -> LLMResponse:
+        msgs: list[dict] = [{"role": "system", "content": system}, *messages]
+        if prefill:
+            msgs.append({"role": "assistant", "content": prefill})
+
+        start = time.monotonic()
+        response = await self._client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            messages=msgs,
+        )
+        latency_ms = int((time.monotonic() - start) * 1000)
+
+        content = response.choices[0].message.content or ""
+        if prefill:
+            content = prefill + content
+        usage = response.usage
+        tokens_in = usage.prompt_tokens if usage else 0
+        tokens_out = usage.completion_tokens if usage else 0
+        cost = _compute_cost(model, tokens_in, tokens_out)
+
+        return LLMResponse(
+            content=content,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=cost,
+            model=model,
+            latency_ms=latency_ms,
+        )
+
+
+class LLMClient:
+    """Unified LLM client with per-agent provider routing, DB recording, and metrics.
+
+    By default (provider="registry"/"auto") each call routes to the provider+model
+    the ProviderRegistry assigns to that agent. Passing a concrete provider name
+    forces a single provider for every agent (used by tests and single-model runs);
+    that forced instance lives on ``self._provider`` and can be overridden directly.
+    """
+
+    def __init__(self, provider: str = "registry", budget_enforcer=None, registry=None) -> None:
         from studio.ai.budget import BudgetEnforcer
+        from studio.ai.registry import ProviderRegistry
 
         self._budget = budget_enforcer or BudgetEnforcer()
-        if provider == "auto":
-            api_key = os.environ.get("ANTHROPIC_API_KEY") or ""
-            if api_key:
-                self._provider: LLMProvider = AnthropicProvider()
-                self._provider_name = "anthropic"
-            else:
-                self._provider = ClaudeCLIProvider()
-                self._provider_name = "claude_cli"
-        elif provider == "anthropic":
-            self._provider = AnthropicProvider()
-            self._provider_name = "anthropic"
-        elif provider == "claude_cli":
-            self._provider = ClaudeCLIProvider()
-            self._provider_name = "claude_cli"
-        else:
-            raise ValueError(f"Unknown provider: {provider!r}")
+        self._registry = registry or ProviderRegistry()
+        self._provider: LLMProvider | None = None  # forced single provider (legacy/test)
+        self._provider_name: str | None = None
+
+        if provider not in ("registry", "auto"):
+            self._provider_name = provider
+            self._provider = self._registry.get(provider)  # type: ignore[assignment]
+
+    def _route(self, agent: str, model: str | None) -> tuple[LLMProvider, str]:
+        """Resolve the provider instance and model name for this call."""
+        if self._provider is not None:
+            return self._provider, (model or "claude-sonnet-4-6")
+        provider, resolved_model = self._registry.resolve(agent)
+        return provider, (model or resolved_model)  # type: ignore[return-value]
 
     async def complete(
         self,
@@ -275,7 +341,7 @@ class LLMClient:
         system_prompt: str,
         user_content: str,
         *,
-        model: str = "claude-sonnet-4-6",
+        model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.0,
         prompt_hash: str = "",
@@ -283,7 +349,7 @@ class LLMClient:
         db=None,  # AsyncSession | None
         prefill: str = "",
     ) -> LLMResponse:
-        """Call the LLM, record metrics and events."""
+        """Call the agent's routed LLM, record metrics and events."""
         from studio.observability.metrics import llm_calls_total, llm_latency_seconds
 
         # Budget circuit breaker: check the session's persisted usage before
@@ -291,11 +357,12 @@ class LLMClient:
         if db is not None and session_id is not None:
             await self._enforce_budget(db, session_id)
 
+        provider, model = self._route(agent, model)
         messages = [{"role": "user", "content": user_content}]
 
         llm_calls_total.labels(agent=agent, model=model).inc()
 
-        response = await self._provider.complete(
+        response = await provider.complete(
             messages,
             system=system_prompt,
             max_tokens=max_tokens,

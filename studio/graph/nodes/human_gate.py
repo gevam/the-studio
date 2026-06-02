@@ -103,12 +103,17 @@ def make_human_gate_node(gate_type: str):
         logger.info("human_gate_resolved", session_id=str(session_id),
                     gate_type=gate_type, action=action)
 
-        return {
+        delta = {
             "current_node": f"human_gate_{gate_type}",
             "awaiting_human": False,
             "human_gate_type": gate_type,
             "human_gate_action": action,
         }
+        # Approving the design gate moves the session into the feature-build phase,
+        # which redirects design_agent's return edge from the UX loop to build_agent.
+        if gate_type == "design" and action == "approve":
+            delta["phase"] = "build"
+        return delta
 
     human_gate_node.__name__ = f"human_gate_{gate_type}"
     return human_gate_node

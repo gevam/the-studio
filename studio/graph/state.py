@@ -32,6 +32,8 @@ class GraphState(TypedDict, total=False):
     current_slice_id: str | None
 
     # Sprint 2 routing flags (§2.4)
+    phase: str  # "design" (pre-skeleton-approval) | "build" (feature slices)
+    slices_planned: bool
     design_ux_needs_revision: bool
     ux_issues_found: bool
     reviewer_rejected: bool

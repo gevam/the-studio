@@ -7,8 +7,8 @@
 
 | Metric | Baseline (plain Claude) | Studio |
 |--------|------------------------|--------|
-| Duration | 52.3s | 675.3s |
-| Cost | $0.2581 | $2.4760 |
+| Duration | 51.6s | 844.6s |
+| Cost | $0.2551 | $2.9826 |
 | Test coverage | 0.0% | 0.0% |
 | Cyclomatic complexity | 4.0 | 4.0 |
 | Coupling score | 0.0 | 0.0 |
@@ -27,4 +27,4 @@ none
 ## Errors
 
 Baseline: none
-Studio: Max iterations reached without verified skeleton
+Studio: none

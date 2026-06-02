@@ -11,6 +11,14 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
+class BudgetExceeded(RuntimeError):
+    """Raised when a session's token or cost budget is fully exhausted.
+
+    Propagates out of the agent's LLM call to the graph node, which marks the
+    session ``error`` and routes to ``complete`` — a hard stop, no further calls.
+    """
+
+
 class BudgetEnforcer:
     """Check token and cost budgets; emit warnings at 80%, hard-stop at 100%."""
 

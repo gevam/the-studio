@@ -6,7 +6,11 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
-from studio.graph.edges import build_friction_router, skeleton_verify_router
+from studio.graph.edges import (
+    build_friction_router,
+    design_to_build_router,
+    skeleton_verify_router,
+)
 from studio.graph.state import GraphState
 
 
@@ -60,7 +64,16 @@ def build_sprint1_graph(
     # Edges
     graph.add_edge(START, "init_session")
     graph.add_edge("init_session", "design_agent")
-    graph.add_edge("design_agent", "skeleton_build")
+
+    # design_agent → skeleton_build, unless a hard stop (budget) set an error.
+    graph.add_conditional_edges(
+        "design_agent",
+        design_to_build_router,
+        {
+            "skeleton_build": "skeleton_build",
+            "complete": "complete",
+        },
+    )
 
     graph.add_conditional_edges(
         "skeleton_build",
@@ -68,6 +81,7 @@ def build_sprint1_graph(
         {
             "design_agent": "design_agent",
             "skeleton_verify": "skeleton_verify",
+            "complete": "complete",
         },
     )
 

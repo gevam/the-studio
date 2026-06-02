@@ -248,7 +248,10 @@ class ClaudeCLIProvider:
 class LLMClient:
     """Unified LLM client that records to DB, emits events, and tracks metrics."""
 
-    def __init__(self, provider: str = "auto") -> None:
+    def __init__(self, provider: str = "auto", budget_enforcer=None) -> None:
+        from studio.ai.budget import BudgetEnforcer
+
+        self._budget = budget_enforcer or BudgetEnforcer()
         if provider == "auto":
             api_key = os.environ.get("ANTHROPIC_API_KEY") or ""
             if api_key:
@@ -282,6 +285,11 @@ class LLMClient:
     ) -> LLMResponse:
         """Call the LLM, record metrics and events."""
         from studio.observability.metrics import llm_calls_total, llm_latency_seconds
+
+        # Budget circuit breaker: check the session's persisted usage before
+        # spending more. Warns at 80% (session.budget_warning), hard-stops at 100%.
+        if db is not None and session_id is not None:
+            await self._enforce_budget(db, session_id)
 
         messages = [{"role": "user", "content": user_content}]
 
@@ -355,6 +363,30 @@ class LLMClient:
 
         return response
 
+    async def _enforce_budget(self, db, session_id: uuid.UUID) -> None:
+        """Check the session's persisted budget; raise BudgetExceeded at 100%."""
+        from studio.ai.budget import BudgetExceeded
+        from studio.db.models import Session
+
+        session = await db.get(Session, session_id)
+        if session is None:
+            return  # nothing to enforce against yet
+
+        ok = await self._budget.check_and_emit(
+            tokens_used=session.tokens_used or 0,
+            token_budget=session.token_budget or 1,
+            cost_usd=float(session.cost_usd or 0.0),
+            cost_budget=float(session.cost_budget or 0.001),
+            session_id=session_id,
+            db=db,
+        )
+        if not ok:
+            raise BudgetExceeded(
+                f"Session {session_id} budget exhausted: "
+                f"tokens {session.tokens_used}/{session.token_budget}, "
+                f"cost ${float(session.cost_usd):.4f}/${float(session.cost_budget):.2f}"
+            )
+
     async def _record_ai_feedback(
         self,
         *,
@@ -369,6 +401,7 @@ class LLMClient:
         cost_usd: float,
     ) -> None:
         from studio.db.models import AIFeedback
+        from studio.events.emitter import emit_event
 
         row = AIFeedback(
             session_id=session_id,
@@ -386,3 +419,13 @@ class LLMClient:
             await db.flush()
         except Exception as exc:
             logger.warning("ai_feedback_flush_failed", error=str(exc))
+            return
+
+        # §7.2 mandatory event paired with the ai_feedback row.
+        await emit_event(
+            db,
+            session_id,
+            "ai.feedback_recorded",
+            data={"agent": agent, "quality_signal": "llm_call_recorded"},
+            agent=agent,
+        )

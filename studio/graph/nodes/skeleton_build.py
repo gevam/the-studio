@@ -66,6 +66,20 @@ async def skeleton_build_node(state: GraphState, *, db, llm, prompt_loader, **_)
         slice_row.status = "building"
         await db.flush()
 
+    from studio.events.emitter import emit_event
+
+    await emit_event(
+        db,
+        session_id,
+        "slice.started",
+        data={
+            "slice_id": str(slice_row.id),
+            "slice_name": slice_row.name,
+            "slice_type": slice_row.slice_type,
+        },
+        agent="orchestrator",
+    )
+
     agent_input = BuildAgentInput(
         session_id=session_id,
         design_digest=state.get("design_digest", ""),
@@ -82,7 +96,13 @@ async def skeleton_build_node(state: GraphState, *, db, llm, prompt_loader, **_)
         },
     )
 
-    output = await run_build_agent(agent_input, db, llm, prompt_loader)
+    from studio.ai.budget import BudgetExceeded
+    from studio.graph.nodes._budget import abort_on_budget
+
+    try:
+        output = await run_build_agent(agent_input, db, llm, prompt_loader)
+    except BudgetExceeded as exc:
+        return await abort_on_budget(db, session_id, exc, node="skeleton_build")
 
     # Update slice with quality metrics
     slice_row.status = "done"
@@ -108,6 +128,19 @@ async def skeleton_build_node(state: GraphState, *, db, llm, prompt_loader, **_)
         .where(DesignFriction.status == "open")
     )
     pending_friction_ids = [str(fid) for fid in friction_result.scalars()]
+
+    await emit_event(
+        db,
+        session_id,
+        "slice.built",
+        data={
+            "slice_id": str(slice_row.id),
+            "files_changed": len(output.files_changed),
+            "tests_written": len(output.tests_written),
+            "friction_count": len(output.friction_items),
+        },
+        agent="build_agent",
+    )
 
     logger.info(
         "skeleton_build_complete",

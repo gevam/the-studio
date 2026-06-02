@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from studio.api.middleware import setup_middleware
 from studio.api.routes.health import router as health_router
+from studio.api.routes.sessions import router as sessions_router
 from studio.api.websocket import router as ws_router
 from studio.config import settings
 from studio.observability.logging import configure_logging
@@ -34,3 +35,4 @@ app = FastAPI(
 setup_middleware(app)
 app.include_router(health_router)
 app.include_router(ws_router)
+app.include_router(sessions_router)

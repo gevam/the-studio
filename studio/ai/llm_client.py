@@ -397,12 +397,16 @@ class ClaudeCLIProvider:
             "Start your reply with { and output nothing else — no preamble, no "
             f"explanation, no markdown code fences:\n{schema_json}"
         )
-        response = await self.complete(
-            messages, system=instruction, max_tokens=max_tokens,
-            temperature=temperature, model=model,
-        )
         try:
+            response = await self.complete(
+                messages, system=instruction, max_tokens=max_tokens,
+                temperature=temperature, model=model,
+            )
             parsed = schema(**_extract_json_object(response.content))
+        except RuntimeError as exc:
+            # Transient CLI subprocess failure (non-zero exit / timeout). Surface as
+            # StructuredOutputError so LLMClient retries once and the node can degrade.
+            raise StructuredOutputError(f"CLI call failed for {schema.__name__}: {exc}") from exc
         except (ValueError, ValidationError) as exc:
             raise StructuredOutputError(
                 f"CLI did not return schema-valid JSON for {schema.__name__}: {exc}"

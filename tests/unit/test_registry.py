@@ -53,3 +53,12 @@ def test_registry_caches_provider_instances():
 def test_registry_unknown_provider_raises():
     with pytest.raises(ValueError):
         ProviderRegistry().get("nope")
+
+
+def test_registry_constructs_provider_with_settings_key(monkeypatch):
+    # CR #6: the provider key comes from settings (one source), not os.environ —
+    # so the availability check and construction can never disagree.
+    monkeypatch.setattr("studio.ai.registry.settings.anthropic_api_key", "sk-from-settings")
+    with patch("studio.ai.llm_client.AnthropicProvider") as mock_cls:
+        ProviderRegistry().get("anthropic")
+        mock_cls.assert_called_once_with("sk-from-settings")

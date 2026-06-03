@@ -132,12 +132,13 @@ class LLMProvider(Protocol):
 class AnthropicProvider:
     """LLM provider using Anthropic's AsyncAnthropic SDK with cache_control on system."""
 
-    def __init__(self) -> None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY") or ""
+    def __init__(self, api_key: str) -> None:
+        # Key is passed in by the registry from settings — single source of truth,
+        # so the registry's availability check and this constructor never disagree.
         if not api_key:
             raise RuntimeError(
-                "ANTHROPIC_API_KEY is not set. "
-                "Set the env var or use provider='claude_cli'."
+                "Anthropic API key is empty. "
+                "Set anthropic_api_key or use provider='claude_cli'."
             )
         try:
             from anthropic import AsyncAnthropic  # type: ignore[import]
@@ -409,12 +410,10 @@ class ClaudeCLIProvider:
 class OpenAIProvider:
     """LLM provider using OpenAI's AsyncOpenAI SDK (for the Reviewer's different family)."""
 
-    def __init__(self) -> None:
-        from studio.config import settings
-
-        api_key = settings.openai_api_key or os.environ.get("OPENAI_API_KEY") or ""
+    def __init__(self, api_key: str) -> None:
+        # Key passed in by the registry from settings (single source of truth).
         if not api_key:
-            raise RuntimeError("OPENAI_API_KEY is not set; cannot use the OpenAI provider.")
+            raise RuntimeError("OpenAI API key is empty; cannot use the OpenAI provider.")
         try:
             from openai import AsyncOpenAI  # type: ignore[import]
         except ImportError as exc:

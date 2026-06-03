@@ -269,10 +269,14 @@ class ClaudeCLIProvider:
         self._cwd = tempfile.mkdtemp(prefix="studio-cli-provider-")
 
     def __del__(self) -> None:
-        # Best-effort cleanup of the per-instance temp working dir.
-        import shutil
+        # Best-effort cleanup of the per-instance temp working dir. Guarded because
+        # __del__ can run during interpreter shutdown when imports are unavailable.
+        try:
+            import shutil
 
-        shutil.rmtree(getattr(self, "_cwd", ""), ignore_errors=True)
+            shutil.rmtree(getattr(self, "_cwd", ""), ignore_errors=True)
+        except Exception:  # noqa: BLE001 — never raise from a finalizer
+            pass
 
     def _find_cli(self) -> str:
         import shutil

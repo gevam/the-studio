@@ -11,9 +11,15 @@ import uuid
 import structlog
 from sqlalchemy import select
 
+from studio.ai.budget import BudgetExceeded
+from studio.ai.llm_client import StructuredOutputError
+from studio.graph.nodes._budget import abort_on_agent_failure
 from studio.graph.state import GraphState
 
 logger = structlog.get_logger(__name__)
+
+# Failures from any agent call that should cleanly stop the session (vs crash the graph).
+_AGENT_FAILURES = (BudgetExceeded, StructuredOutputError)
 
 
 async def _load_session(db, session_id):
@@ -38,17 +44,20 @@ async def ux_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) -> di
     session = await _load_session(db, session_id)
     config = (session.config or {}) if session else {}
 
-    out = await run_ux_agent(
-        UXAgentInput(
-            session_id=session_id,
-            design_digest=state.get("design_digest", ""),
-            context="design_review",
-            project_name=session.name if session else "untitled",
-            requirements=await _requirements(db, session_id),
-            iteration=state.get("slice_rework_used", 0),
-        ),
-        db, llm, prompt_loader,
-    )
+    try:
+        out = await run_ux_agent(
+            UXAgentInput(
+                session_id=session_id,
+                design_digest=state.get("design_digest", ""),
+                context="design_review",
+                project_name=session.name if session else "untitled",
+                requirements=await _requirements(db, session_id),
+                iteration=state.get("slice_rework_used", 0),
+            ),
+            db, llm, prompt_loader,
+        )
+    except _AGENT_FAILURES as exc:
+        return await abort_on_agent_failure(db, session_id, exc, node="ux_agent")
     review = out.review
     metric = review.experience_metric.model_dump() if review.experience_metric else {}
     if session is not None and metric:
@@ -86,17 +95,27 @@ async def slice_plan_node(state: GraphState, *, db, llm, prompt_loader, **_) -> 
 
     if not remaining and not state.get("slices_planned"):
         session = await _load_session(db, session_id)
-        result = await plan_slices(
-            SlicePlanInput(
-                session_id=session_id,
-                design_digest=state.get("design_digest", ""),
-                project_name=session.name if session else "untitled",
-                requirements=await _requirements(db, session_id),
-                iteration=state.get("iteration", 0),
-            ),
-            db, llm, prompt_loader,
-        )
+        try:
+            result = await plan_slices(
+                SlicePlanInput(
+                    session_id=session_id,
+                    design_digest=state.get("design_digest", ""),
+                    project_name=session.name if session else "untitled",
+                    requirements=await _requirements(db, session_id),
+                    iteration=state.get("iteration", 0),
+                ),
+                db, llm, prompt_loader,
+            )
+        except _AGENT_FAILURES as exc:
+            return await abort_on_agent_failure(db, session_id, exc, node="slice_plan")
         remaining = result.slice_ids
+        # Never ship an empty MVP: planning produced no in-scope slices (CR #5).
+        if not remaining:
+            from studio.graph.nodes._budget import abort_session
+            return await abort_session(
+                db, session_id, RuntimeError("slice planning produced no slices"),
+                node="slice_plan", error_type="no_slices_planned",
+            )
 
     current = remaining.pop(0) if remaining else None
     if current:
@@ -117,9 +136,7 @@ async def slice_plan_node(state: GraphState, *, db, llm, prompt_loader, **_) -> 
 async def build_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) -> dict:
     """Build the current feature slice via the coding agent (TDD); collect friction."""
     from studio.agents.build import BuildAgentInput, run_build_agent
-    from studio.ai.budget import BudgetExceeded
     from studio.db.models import DesignFriction, Slice
-    from studio.graph.nodes._budget import abort_on_budget
 
     session_id = uuid.UUID(state["session_id"])
     session = await _load_session(db, session_id)
@@ -139,8 +156,8 @@ async def build_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) ->
     )
     try:
         output = await run_build_agent(agent_input, db, llm, prompt_loader)
-    except BudgetExceeded as exc:
-        return await abort_on_budget(db, session_id, exc, node="build_agent")
+    except _AGENT_FAILURES as exc:
+        return await abort_on_agent_failure(db, session_id, exc, node="build_agent")
 
     if slice_row and output.metrics:
         from studio.graph.nodes.skeleton_build import _clamp_metric
@@ -237,20 +254,23 @@ async def reviewer_node(state: GraphState, *, db, llm, prompt_loader, **_) -> di
         .where(VerificationResult.passed.is_(True))
         .order_by(VerificationResult.created_at.desc()).limit(1)
     )
-    result = await run_reviewer(
-        ReviewerInput(
-            session_id=session_id, design_digest=state.get("design_digest", ""),
-            design_version=state.get("design_version", 1),
-            project_name=session.name if session else "untitled",
-            slice_id=uuid.UUID(slice_id) if slice_id else None,
-            slice_name=slice_row.name if slice_row else "slice",
-            slice_description=slice_row.description if slice_row else "",
-            coverage_pct=float(vr.test_coverage) if vr and vr.test_coverage else 0.0,
-            tests_run=vr.tests_run if vr else 0,
-            iteration=state.get("iteration", 0),
-        ),
-        db, llm, prompt_loader,
-    )
+    try:
+        result = await run_reviewer(
+            ReviewerInput(
+                session_id=session_id, design_digest=state.get("design_digest", ""),
+                design_version=state.get("design_version", 1),
+                project_name=session.name if session else "untitled",
+                slice_id=uuid.UUID(slice_id) if slice_id else None,
+                slice_name=slice_row.name if slice_row else "slice",
+                slice_description=slice_row.description if slice_row else "",
+                coverage_pct=float(vr.test_coverage) if vr and vr.test_coverage else 0.0,
+                tests_run=vr.tests_run if vr else 0,
+                iteration=state.get("iteration", 0),
+            ),
+            db, llm, prompt_loader,
+        )
+    except _AGENT_FAILURES as exc:
+        return await abort_on_agent_failure(db, session_id, exc, node="reviewer")
     rejected = not result.output.passed
     return {
         "current_node": "reviewer",

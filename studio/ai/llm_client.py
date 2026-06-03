@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 import structlog
+from pydantic import ValidationError
 
 logger = structlog.get_logger(__name__)
 
@@ -89,6 +90,16 @@ class StructuredResponse:
     cost_usd: float
     model: str
     latency_ms: int
+
+
+class StructuredOutputError(RuntimeError):
+    """A provider could not produce schema-valid structured output.
+
+    Raised by a provider's complete_structured on a refusal, a missing/empty
+    tool-use block, a None parse, or unparseable text. LLMClient retries once with
+    a reminder; if it still fails, this propagates to the node, which marks the
+    session errored (same handling as BudgetExceeded) rather than crashing the graph.
+    """
 
 
 @runtime_checkable
@@ -210,14 +221,22 @@ class AnthropicProvider:
         )
         latency_ms = int((time.monotonic() - start) * 1000)
 
-        tool_input = next(
-            (block.input for block in response.content if getattr(block, "type", "") == "tool_use"),
-            {},
+        tool_block = next(
+            (b for b in response.content if getattr(b, "type", "") == "tool_use"), None,
         )
         tokens_in = response.usage.input_tokens
         tokens_out = response.usage.output_tokens
+        if tool_block is None:
+            raise StructuredOutputError(
+                f"Anthropic returned no tool_use block for {schema.__name__} "
+                f"(stop_reason={getattr(response, 'stop_reason', '?')})"
+            )
+        try:
+            parsed = schema(**tool_block.input)
+        except ValidationError as exc:
+            raise StructuredOutputError(f"{schema.__name__} validation failed: {exc}") from exc
         return StructuredResponse(
-            parsed=schema(**tool_input),
+            parsed=parsed,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_usd=_compute_cost(model, tokens_in, tokens_out),
@@ -371,9 +390,14 @@ class ClaudeCLIProvider:
             messages, system=instruction, max_tokens=max_tokens,
             temperature=temperature, model=model,
         )
-        data = _extract_json_object(response.content)
+        try:
+            parsed = schema(**_extract_json_object(response.content))
+        except (ValueError, ValidationError) as exc:
+            raise StructuredOutputError(
+                f"CLI did not return schema-valid JSON for {schema.__name__}: {exc}"
+            ) from exc
         return StructuredResponse(
-            parsed=schema(**data),
+            parsed=parsed,
             tokens_in=response.tokens_in,
             tokens_out=response.tokens_out,
             cost_usd=response.cost_usd,
@@ -462,8 +486,14 @@ class OpenAIProvider:
         usage = completion.usage
         tokens_in = usage.prompt_tokens if usage else 0
         tokens_out = usage.completion_tokens if usage else 0
+        message = completion.choices[0].message
+        if getattr(message, "refusal", None) or message.parsed is None:
+            raise StructuredOutputError(
+                f"OpenAI returned no parsed {schema.__name__} "
+                f"(refusal={getattr(message, 'refusal', None)!r})"
+            )
         return StructuredResponse(
-            parsed=completion.choices[0].message.parsed,
+            parsed=message.parsed,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_usd=_compute_cost(model, tokens_in, tokens_out),
@@ -619,14 +649,30 @@ class LLMClient:
         provider, model = self._route(agent, model)
         llm_calls_total.labels(agent=agent, model=model).inc()
 
-        result = await provider.complete_structured(
-            [{"role": "user", "content": user_content}],
-            system=system_prompt,
-            schema=schema,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            model=model,
-        )
+        # One retry with an explicit reminder before giving up — a transient bad
+        # generation (refusal, stray prose, truncation) usually self-corrects.
+        attempts = [
+            user_content,
+            user_content + (
+                "\n\nReminder: respond with ONLY a single JSON object that exactly "
+                f"matches the {schema.__name__} schema — no prose, no code fences."
+            ),
+        ]
+        last_exc: StructuredOutputError | None = None
+        result = None
+        for attempt in attempts:
+            try:
+                result = await provider.complete_structured(
+                    [{"role": "user", "content": attempt}],
+                    system=system_prompt, schema=schema,
+                    max_tokens=max_tokens, temperature=temperature, model=model,
+                )
+                break
+            except StructuredOutputError as exc:
+                last_exc = exc
+                logger.warning("structured_output_retry", agent=agent, error=str(exc)[:200])
+        if result is None:
+            raise last_exc  # exhausted retries — propagate to the node
         llm_latency_seconds.labels(agent=agent, model=model).observe(result.latency_ms / 1000)
 
         if db is not None and session_id is not None:

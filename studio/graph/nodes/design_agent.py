@@ -85,12 +85,13 @@ async def design_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) -
     )
 
     from studio.ai.budget import BudgetExceeded
-    from studio.graph.nodes._budget import abort_on_budget
+    from studio.ai.llm_client import StructuredOutputError
+    from studio.graph.nodes._budget import abort_on_agent_failure
 
     try:
         output = await run_design_agent(agent_input, db, llm, prompt_loader)
-    except BudgetExceeded as exc:
-        return await abort_on_budget(db, session_id, exc, node="design_agent")
+    except (BudgetExceeded, StructuredOutputError) as exc:
+        return await abort_on_agent_failure(db, session_id, exc, node="design_agent")
 
     # Update session node pointer
     if session:

@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os
 import time
 import uuid
-from dataclasses import dataclass, field
-from typing import Optional, Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import Any, Protocol, runtime_checkable
 
 import structlog
 
@@ -21,11 +20,15 @@ _COST_PER_TOKEN_IN: dict[str, float] = {
     "claude-sonnet-4-6": 3.00 / 1_000_000,
     "claude-opus-4-5": 15.00 / 1_000_000,
     "claude-haiku-4-5": 0.25 / 1_000_000,
+    "gpt-4o": 2.50 / 1_000_000,
+    "gpt-4o-mini": 0.15 / 1_000_000,
 }
 _COST_PER_TOKEN_OUT: dict[str, float] = {
     "claude-sonnet-4-6": 15.00 / 1_000_000,
     "claude-opus-4-5": 75.00 / 1_000_000,
     "claude-haiku-4-5": 1.25 / 1_000_000,
+    "gpt-4o": 10.00 / 1_000_000,
+    "gpt-4o-mini": 0.60 / 1_000_000,
 }
 
 _DEFAULT_COST_IN = 3.00 / 1_000_000
@@ -38,9 +41,49 @@ def _compute_cost(model: str, tokens_in: int, tokens_out: int) -> float:
     return tokens_in * cost_in + tokens_out * cost_out
 
 
+def _schema_tool_name(schema: type) -> str:
+    """Tool/function name for a Pydantic schema (snake_case-ish, API-safe)."""
+    import re
+
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", schema.__name__).lower()
+
+
+def _extract_json_object(text: str) -> dict:
+    """Extract the first valid top-level JSON object from text (CLI fallback)."""
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        end = next(
+            (i for i in range(len(lines) - 1, 0, -1) if lines[i].strip() == "```"),
+            len(lines),
+        )
+        text = "\n".join(lines[1:end]).strip()
+    decoder = json.JSONDecoder()
+    idx = 0
+    while (brace := text.find("{", idx)) != -1:
+        try:
+            obj, _ = decoder.raw_decode(text, brace)  # tolerates trailing content
+            return obj
+        except json.JSONDecodeError:
+            idx = brace + 1
+    raise ValueError("no valid JSON object found in response")
+
+
 @dataclass
 class LLMResponse:
     content: str
+    tokens_in: int
+    tokens_out: int
+    cost_usd: float
+    model: str
+    latency_ms: int
+
+
+@dataclass
+class StructuredResponse:
+    """A schema-validated model plus the usage of the call that produced it."""
+
+    parsed: Any
     tokens_in: int
     tokens_out: int
     cost_usd: float
@@ -60,6 +103,19 @@ class LLMProvider(Protocol):
         model: str,
         prefill: str = "",
     ) -> LLMResponse: ...
+
+    async def complete_structured(
+        self,
+        messages: list[dict],
+        *,
+        system: str,
+        schema: type,
+        max_tokens: int,
+        temperature: float,
+        model: str,
+    ) -> StructuredResponse:
+        """Return an instance of ``schema`` via native structured output (no parse)."""
+        ...
 
 
 class AnthropicProvider:
@@ -89,7 +145,6 @@ class AnthropicProvider:
         model: str,
         prefill: str = "",
     ) -> LLMResponse:
-        from anthropic import AsyncAnthropic  # type: ignore[import]
 
         msgs = list(messages)
         if prefill:
@@ -127,6 +182,49 @@ class AnthropicProvider:
             latency_ms=latency_ms,
         )
 
+    async def complete_structured(
+        self,
+        messages: list[dict],
+        *,
+        system: str,
+        schema: type,
+        max_tokens: int,
+        temperature: float,
+        model: str,
+    ) -> StructuredResponse:
+        # Native tool-calling: force a single tool whose input IS the schema.
+        tool_name = _schema_tool_name(schema)
+        start = time.monotonic()
+        response = await self._client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            messages=messages,
+            tools=[{
+                "name": tool_name,
+                "description": f"Return a {schema.__name__} object.",
+                "input_schema": schema.model_json_schema(),
+            }],
+            tool_choice={"type": "tool", "name": tool_name},
+        )
+        latency_ms = int((time.monotonic() - start) * 1000)
+
+        tool_input = next(
+            (block.input for block in response.content if getattr(block, "type", "") == "tool_use"),
+            {},
+        )
+        tokens_in = response.usage.input_tokens
+        tokens_out = response.usage.output_tokens
+        return StructuredResponse(
+            parsed=schema(**tool_input),
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=_compute_cost(model, tokens_in, tokens_out),
+            model=model,
+            latency_ms=latency_ms,
+        )
+
 
 class ClaudeCLIProvider:
     """LLM provider using the claude CLI subprocess (for Max subscription auth).
@@ -143,7 +241,12 @@ class ClaudeCLIProvider:
     ]
 
     def __init__(self) -> None:
+        import tempfile
+
         self._cli_path = self._find_cli()
+        # Run the agent CLI in an isolated empty dir so it cannot read the host
+        # repo and wander off-task (it is a coding agent, not a bare model).
+        self._cwd = tempfile.mkdtemp(prefix="studio-cli-provider-")
 
     def _find_cli(self) -> str:
         import shutil
@@ -202,11 +305,12 @@ class ClaudeCLIProvider:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=self._cwd,
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(input=full_prompt.encode()), timeout=900
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise RuntimeError("Claude CLI timed out after 900s")
         except FileNotFoundError:
             raise RuntimeError(
@@ -244,30 +348,158 @@ class ClaudeCLIProvider:
             latency_ms=latency_ms,
         )
 
+    async def complete_structured(
+        self,
+        messages: list[dict],
+        *,
+        system: str,
+        schema: type,
+        max_tokens: int,
+        temperature: float,
+        model: str,
+    ) -> StructuredResponse:
+        # The CLI has no tool-calling surface, so we constrain via the JSON Schema
+        # and validate the result — the only path that is not native structured
+        # output, kept for offline (Max-subscription) runs.
+        schema_json = json.dumps(schema.model_json_schema())
+        instruction = (
+            f"{system}\n\nOutput ONLY a single JSON object matching this schema. "
+            "Start your reply with { and output nothing else — no preamble, no "
+            f"explanation, no markdown code fences:\n{schema_json}"
+        )
+        response = await self.complete(
+            messages, system=instruction, max_tokens=max_tokens,
+            temperature=temperature, model=model,
+        )
+        data = _extract_json_object(response.content)
+        return StructuredResponse(
+            parsed=schema(**data),
+            tokens_in=response.tokens_in,
+            tokens_out=response.tokens_out,
+            cost_usd=response.cost_usd,
+            model=model,
+            latency_ms=response.latency_ms,
+        )
+
+
+class OpenAIProvider:
+    """LLM provider using OpenAI's AsyncOpenAI SDK (for the Reviewer's different family)."""
+
+    def __init__(self) -> None:
+        from studio.config import settings
+
+        api_key = settings.openai_api_key or os.environ.get("OPENAI_API_KEY") or ""
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is not set; cannot use the OpenAI provider.")
+        try:
+            from openai import AsyncOpenAI  # type: ignore[import]
+        except ImportError as exc:
+            raise ImportError("openai package not installed") from exc
+
+        self._client = AsyncOpenAI(api_key=api_key)
+
+    async def complete(
+        self,
+        messages: list[dict],
+        *,
+        system: str,
+        max_tokens: int,
+        temperature: float,
+        model: str,
+        prefill: str = "",
+    ) -> LLMResponse:
+        msgs: list[dict] = [{"role": "system", "content": system}, *messages]
+        if prefill:
+            msgs.append({"role": "assistant", "content": prefill})
+
+        start = time.monotonic()
+        response = await self._client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            messages=msgs,
+        )
+        latency_ms = int((time.monotonic() - start) * 1000)
+
+        content = response.choices[0].message.content or ""
+        if prefill:
+            content = prefill + content
+        usage = response.usage
+        tokens_in = usage.prompt_tokens if usage else 0
+        tokens_out = usage.completion_tokens if usage else 0
+        cost = _compute_cost(model, tokens_in, tokens_out)
+
+        return LLMResponse(
+            content=content,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=cost,
+            model=model,
+            latency_ms=latency_ms,
+        )
+
+    async def complete_structured(
+        self,
+        messages: list[dict],
+        *,
+        system: str,
+        schema: type,
+        max_tokens: int,
+        temperature: float,
+        model: str,
+    ) -> StructuredResponse:
+        # Native structured outputs via the SDK parse helper.
+        start = time.monotonic()
+        completion = await self._client.beta.chat.completions.parse(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            messages=[{"role": "system", "content": system}, *messages],
+            response_format=schema,
+        )
+        latency_ms = int((time.monotonic() - start) * 1000)
+
+        usage = completion.usage
+        tokens_in = usage.prompt_tokens if usage else 0
+        tokens_out = usage.completion_tokens if usage else 0
+        return StructuredResponse(
+            parsed=completion.choices[0].message.parsed,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=_compute_cost(model, tokens_in, tokens_out),
+            model=model,
+            latency_ms=latency_ms,
+        )
+
 
 class LLMClient:
-    """Unified LLM client that records to DB, emits events, and tracks metrics."""
+    """Unified LLM client with per-agent provider routing, DB recording, and metrics.
 
-    def __init__(self, provider: str = "auto", budget_enforcer=None) -> None:
+    By default (provider="registry"/"auto") each call routes to the provider+model
+    the ProviderRegistry assigns to that agent. Passing a concrete provider name
+    forces a single provider for every agent (used by tests and single-model runs);
+    that forced instance lives on ``self._provider`` and can be overridden directly.
+    """
+
+    def __init__(self, provider: str = "registry", budget_enforcer=None, registry=None) -> None:
         from studio.ai.budget import BudgetEnforcer
+        from studio.ai.registry import ProviderRegistry
 
         self._budget = budget_enforcer or BudgetEnforcer()
-        if provider == "auto":
-            api_key = os.environ.get("ANTHROPIC_API_KEY") or ""
-            if api_key:
-                self._provider: LLMProvider = AnthropicProvider()
-                self._provider_name = "anthropic"
-            else:
-                self._provider = ClaudeCLIProvider()
-                self._provider_name = "claude_cli"
-        elif provider == "anthropic":
-            self._provider = AnthropicProvider()
-            self._provider_name = "anthropic"
-        elif provider == "claude_cli":
-            self._provider = ClaudeCLIProvider()
-            self._provider_name = "claude_cli"
-        else:
-            raise ValueError(f"Unknown provider: {provider!r}")
+        self._registry = registry or ProviderRegistry()
+        self._provider: LLMProvider | None = None  # forced single provider (legacy/test)
+        self._provider_name: str | None = None
+
+        if provider not in ("registry", "auto"):
+            self._provider_name = provider
+            self._provider = self._registry.get(provider)  # type: ignore[assignment]
+
+    def _route(self, agent: str, model: str | None) -> tuple[LLMProvider, str]:
+        """Resolve the provider instance and model name for this call."""
+        if self._provider is not None:
+            return self._provider, (model or "claude-sonnet-4-6")
+        provider, resolved_model = self._registry.resolve(agent)
+        return provider, (model or resolved_model)  # type: ignore[return-value]
 
     async def complete(
         self,
@@ -275,15 +507,15 @@ class LLMClient:
         system_prompt: str,
         user_content: str,
         *,
-        model: str = "claude-sonnet-4-6",
+        model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.0,
         prompt_hash: str = "",
-        session_id: Optional[uuid.UUID] = None,
+        session_id: uuid.UUID | None = None,
         db=None,  # AsyncSession | None
         prefill: str = "",
     ) -> LLMResponse:
-        """Call the LLM, record metrics and events."""
+        """Call the agent's routed LLM, record metrics and events."""
         from studio.observability.metrics import llm_calls_total, llm_latency_seconds
 
         # Budget circuit breaker: check the session's persisted usage before
@@ -291,11 +523,12 @@ class LLMClient:
         if db is not None and session_id is not None:
             await self._enforce_budget(db, session_id)
 
+        provider, model = self._route(agent, model)
         messages = [{"role": "user", "content": user_content}]
 
         llm_calls_total.labels(agent=agent, model=model).inc()
 
-        response = await self._provider.complete(
+        response = await provider.complete(
             messages,
             system=system_prompt,
             max_tokens=max_tokens,
@@ -362,6 +595,79 @@ class LLMClient:
         )
 
         return response
+
+    async def complete_structured(
+        self,
+        agent: str,
+        system_prompt: str,
+        user_content: str,
+        schema: type,
+        *,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        prompt_hash: str = "",
+        session_id: uuid.UUID | None = None,
+        db=None,
+    ) -> StructuredResponse:
+        """Schema-validated completion via the provider's native structured output."""
+        from studio.observability.metrics import llm_calls_total, llm_latency_seconds
+
+        if db is not None and session_id is not None:
+            await self._enforce_budget(db, session_id)
+
+        provider, model = self._route(agent, model)
+        llm_calls_total.labels(agent=agent, model=model).inc()
+
+        result = await provider.complete_structured(
+            [{"role": "user", "content": user_content}],
+            system=system_prompt,
+            schema=schema,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            model=model,
+        )
+        llm_latency_seconds.labels(agent=agent, model=model).observe(result.latency_ms / 1000)
+
+        if db is not None and session_id is not None:
+            await self._record_call_events(
+                db, session_id, agent=agent, model=model, prompt_hash=prompt_hash,
+                tokens_in=result.tokens_in, tokens_out=result.tokens_out,
+                latency_ms=result.latency_ms, cost_usd=result.cost_usd,
+            )
+
+        logger.info(
+            "llm_complete_structured", agent=agent, model=model, schema=schema.__name__,
+            tokens_in=result.tokens_in, tokens_out=result.tokens_out,
+            cost_usd=round(result.cost_usd, 6),
+        )
+        return result
+
+    async def _record_call_events(
+        self, db, session_id: uuid.UUID, *, agent: str, model: str, prompt_hash: str,
+        tokens_in: int, tokens_out: int, latency_ms: int, cost_usd: float,
+    ) -> None:
+        """Emit agent.llm_call/llm_response and record ai_feedback for one call."""
+        from studio.events.emitter import emit_event
+
+        await emit_event(
+            db, session_id, "agent.llm_call",
+            data={
+                "agent": agent, "model": model,
+                "prompt_hash": prompt_hash, "tokens_in": tokens_in,
+            },
+            agent=agent,
+        )
+        await emit_event(
+            db, session_id, "agent.llm_response",
+            data={"agent": agent, "model": model, "tokens_out": tokens_out,
+                  "latency_ms": latency_ms, "cost_usd": cost_usd},
+            agent=agent,
+        )
+        await self._record_ai_feedback(
+            db=db, session_id=session_id, agent=agent, model=model, prompt_hash=prompt_hash,
+            tokens_in=tokens_in, tokens_out=tokens_out, latency_ms=latency_ms, cost_usd=cost_usd,
+        )
 
     async def _enforce_budget(self, db, session_id: uuid.UUID) -> None:
         """Check the session's persisted budget; raise BudgetExceeded at 100%."""

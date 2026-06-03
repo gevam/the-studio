@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import json
-import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import structlog
 
-from studio.ai.llm_client import LLMClient, LLMResponse
+from studio.ai.llm_client import LLMClient
 from studio.ai.prompt_loader import PromptLoader
 from studio.design.revision import create_revision_record, generate_digest
 from studio.design.schema import LivingDesign
@@ -96,61 +94,23 @@ async def run_design_agent(
 
     prompt_hash = task_tpl.hash
 
-    # 3. Call LLM
-    response: LLMResponse = await llm.complete(
+    # 3. Structured completion → schema-validated LivingDesign (no prompt-and-parse).
+    result = await llm.complete_structured(
         agent="design_agent",
         system_prompt=system_tpl.content,
         user_content=user_content,
-        model="claude-sonnet-4-6",
+        schema=LivingDesign,
         max_tokens=8192,
         temperature=0.0,
         prompt_hash=prompt_hash,
         session_id=input.session_id,
         db=db,
-        prefill="{",
     )
+    design: LivingDesign = result.parsed
+    tokens_used = result.tokens_in + result.tokens_out
+    cost_usd = result.cost_usd
 
-    # 4. Parse JSON response → LivingDesign
-    design = _parse_design(response.content)
-
-    # Track accumulated usage across initial call and optional retry
-    tokens_used = response.tokens_in + response.tokens_out
-    cost_usd = response.cost_usd
-
-    # 5. If parse fails, retry once
-    if design is None:
-        retry_content = (
-            "Your response was not valid JSON. "
-            "Return ONLY raw JSON matching the LivingDesign schema. "
-            "No markdown fences, no explanation — raw JSON only.\n\n"
-            f"Previous response (first 500 chars):\n{response.content[:500]}"
-        )
-        retry_response: LLMResponse = await llm.complete(
-            agent="design_agent",
-            system_prompt=system_tpl.content,
-            user_content=retry_content,
-            model="claude-sonnet-4-6",
-            max_tokens=8192,
-            temperature=0.0,
-            prompt_hash=prompt_hash,
-            session_id=input.session_id,
-            db=db,
-            prefill="{",
-        )
-        tokens_used += retry_response.tokens_in + retry_response.tokens_out
-        cost_usd += retry_response.cost_usd
-        design = _parse_design(retry_response.content)
-
-        if design is None:
-            logger.error("design_agent_parse_failed", content_preview=response.content[:200])
-            # Fall back to empty design
-            design = LivingDesign(
-                version=input.prev_version + 1,
-                open_questions=["Design parsing failed — LLM returned invalid JSON"],
-                known_friction=["Could not parse LLM output"],
-            )
-
-    # 6. Set version
+    # 4. Set version
     new_version = input.prev_version + 1
     design = design.model_copy(update={"version": new_version})
     design = design.compute_and_set_hash()
@@ -172,7 +132,6 @@ async def run_design_agent(
 
     # 9. If triggered by friction: update DesignFriction rows status='resolved'
     if input.trigger in ("friction", "skeleton_fail") and input.friction_items:
-        from sqlalchemy import select, update as sa_update
 
         friction_ids = [
             item.get("id") for item in input.friction_items
@@ -239,51 +198,3 @@ async def run_design_agent(
         tokens_used=tokens_used,
         cost_usd=cost_usd,
     )
-
-
-def _parse_design(content: str) -> Optional[LivingDesign]:
-    """Attempt to parse LLM output as LivingDesign. Returns None on failure.
-
-    Handles:
-    1. Direct LivingDesign JSON
-    2. Friction revision wrapper: {"revised_design": {...}, ...}
-    3. Markdown-fenced JSON (```json ... ```)
-    4. JSON embedded after prose preamble (scan for first '{')
-    """
-    text = content.strip()
-
-    # Strip markdown fences
-    if text.startswith("```"):
-        lines = text.split("\n")
-        start = 1
-        end = len(lines)
-        for i in range(len(lines) - 1, 0, -1):
-            if lines[i].strip() == "```":
-                end = i
-                break
-        text = "\n".join(lines[start:end]).strip()
-
-    # Try every '{' position as a potential JSON start (handles prose preamble
-    # and prefill-prepended '{' that doesn't belong to the actual JSON object)
-    idx = 0
-    while True:
-        brace_idx = text.find("{", idx)
-        if brace_idx == -1:
-            break
-        candidate = text[brace_idx:]
-        try:
-            data = json.loads(candidate)
-        except json.JSONDecodeError:
-            idx = brace_idx + 1
-            continue
-        # JSON parsed — this is our candidate object. Unwrap and validate.
-        if isinstance(data, dict) and "revised_design" in data:
-            data = data["revised_design"]
-        try:
-            return LivingDesign(**data)
-        except Exception as exc:
-            logger.warning("design_parse_schema_error", error=str(exc)[:200])
-            return None
-
-    logger.warning("design_parse_failed", error="no valid JSON object found in response")
-    return None

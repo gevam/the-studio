@@ -173,12 +173,14 @@ async def run_studio_benchmark(
     project: BenchmarkProject,
     output_dir: Path,
     db_url: str,
+    *,
+    sprint: int = 2,
 ) -> BenchmarkResult:
-    """Run project through The Studio."""
+    """Run project through The Studio (sprint=2 → full graph; sprint=1 → skeleton loop)."""
     from studio.ai.llm_client import LLMClient
     from studio.ai.prompt_loader import PromptLoader
     from studio.db.session import AsyncSessionLocal
-    from studio.graph.builder import build_sprint1_graph
+    from studio.graph.builder import build_sprint1_graph, build_sprint2_graph
 
     project_path = output_dir / "studio" / project.name
     project_path.mkdir(parents=True, exist_ok=True)
@@ -199,7 +201,14 @@ async def run_studio_benchmark(
             config={
                 "project_path": str(project_path),
                 "stack": "python",
-                "max_design_iterations": 3,
+                # Modest loop caps keep a real-LLM run bounded while still letting
+                # each loop fire at least once.
+                "max_design_iterations": 2,
+                "max_design_ux_loops": 1,
+                "max_feature_build_attempts": 2,
+                # Non-interactive run: the design/ship gates auto-approve so the
+                # session completes; they still emit human.checkpoint/decision.
+                "auto_approve_gates": True,
             },
         )
         db.add(session_row)
@@ -212,11 +221,16 @@ async def run_studio_benchmark(
             ))
         await db.commit()
 
-    compiled = build_sprint1_graph(
-        db_factory=AsyncSessionLocal,
-        llm=llm,
-        prompt_loader=prompt_loader,
-    )
+    if sprint == 2:
+        compiled = build_sprint2_graph(
+            db_factory=AsyncSessionLocal, llm=llm, prompt_loader=prompt_loader,
+        )
+        invoke_config = {"recursion_limit": 200}
+    else:
+        compiled = build_sprint1_graph(
+            db_factory=AsyncSessionLocal, llm=llm, prompt_loader=prompt_loader,
+        )
+        invoke_config = {}
 
     start = time.monotonic()
     try:
@@ -224,7 +238,7 @@ async def run_studio_benchmark(
         async with AsyncSessionLocal() as db:
             initial_state = await project_state(session_id, db)
 
-        final_state = await compiled.ainvoke(initial_state)
+        final_state = await compiled.ainvoke(initial_state, invoke_config)
         error = final_state.get("error")
     except Exception as exc:
         final_state = {}

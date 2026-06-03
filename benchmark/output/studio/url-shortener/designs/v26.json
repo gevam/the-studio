@@ -1,0 +1,16 @@
+{
+  "version": 26,
+  "content_hash": "cc8862074280c27732ae1482f04ab60298e3aea0d5712ead93c825e2db4e32b6",
+  "modules": [],
+  "data_model": [],
+  "ux_flows": [],
+  "customer_journey": "",
+  "experience_metric": {},
+  "architecture_decisions": [],
+  "threat_model": [],
+  "privacy_inventory": [],
+  "i18n_plan": {},
+  "open_questions": [],
+  "known_friction": [],
+  "sections": []
+}

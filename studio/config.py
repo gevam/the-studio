@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
 
+    # Per-agent provider routing (§4.4, §13 #4). Reviewer defaults to a different
+    # model family from the other agents; falls back gracefully if its key/SDK is
+    # absent (see studio/ai/registry.py). Override via env, e.g. REVIEWER_PROVIDER.
+    default_provider: str = "anthropic"  # "anthropic" | "claude_cli" | "openai"
+    default_model: str = "claude-sonnet-4-6"
+    reviewer_provider: str = "openai"
+    reviewer_model: str = "gpt-4o"
+
     # Budgets
     default_token_budget: int = 500_000
     default_cost_budget: float = 50.0

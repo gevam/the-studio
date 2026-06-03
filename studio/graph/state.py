@@ -1,8 +1,7 @@
 """LangGraph state — thin projection from DB, never holds full artifacts."""
 
-from typing import Optional
+
 from typing_extensions import TypedDict
-import uuid
 
 
 class GraphState(TypedDict, total=False):
@@ -30,7 +29,18 @@ class GraphState(TypedDict, total=False):
     pending_friction_ids: list[str]  # UUIDs as strings
     verification_passed: bool
     remaining_slice_ids: list[str]
-    current_slice_id: Optional[str]
+    current_slice_id: str | None
+
+    # Sprint 2 routing flags (§2.4)
+    phase: str  # "design" (pre-skeleton-approval) | "build" (feature slices)
+    slices_planned: bool
+    design_ux_needs_revision: bool
+    ux_issues_found: bool
+    ux_review_attempts: int
+    reviewer_rejected: bool
+    reviewer_attempts: int
+    human_gate_action: str | None  # "approve" | "reject"
+    experience_metric: dict
 
     # Budget
     tokens_used: int
@@ -40,14 +50,14 @@ class GraphState(TypedDict, total=False):
 
     # Human gate (Sprint 2+)
     awaiting_human: bool
-    human_gate_type: Optional[str]
+    human_gate_type: str | None
 
     # Config
     config: dict
 
     # Observability
-    trace_id: Optional[str]
-    span_id: Optional[str]
+    trace_id: str | None
+    span_id: str | None
 
     # Error
-    error: Optional[str]
+    error: str | None

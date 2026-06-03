@@ -57,3 +57,9 @@ Open questions from §13 still pending. If you hit one, stop and ask in the PR.
 - Don't bypass the verification sandbox.
 - Don't add `localStorage` / `sessionStorage` in frontend artifacts.
 - Don't change ARCHITECTURE.md without a corresponding ADR entry in the living design schema.
+
+## Deferred to Sprint 3
+
+- **Reviewer cross-family provider.** Sprint 2 shipped the provider registry but the Reviewer ran on `claude-opus-4-5` (Anthropic fallback) because no `OPENAI_API_KEY` was available. §4.4 requires a *different model family* from the other agents to avoid same-family blind spots. Sprint 3 resolution: either (a) wire `OPENAI_API_KEY` into the worker container and default Reviewer to GPT-4o, or (b) document an explicit decision to stay single-family with rationale. Track which path before any Sprint 3 work depends on Reviewer output quality.
+
+- **"Accept on cap" semantics.** When the per-slice rework cap is hit, the graph currently forces forward progress even if the Reviewer rejected the slice. This re-opens the optimistic-resolution question flagged in PR #2's CR §1: "resolved" / "approved" may mean "we ran out of attempts," not "the issue was fixed." Sprint 3 resolution: decide whether cap-exhaustion should (a) mark the session as `degraded` rather than `completed`, (b) emit a distinct `slice.accepted_under_cap` event so dashboards can separate genuine convergence from forced acceptance, or (c) escalate to a human gate. Pick one before Sprint 3's UI work, since the dashboards (§7.5 Design Health) will mislead otherwise.

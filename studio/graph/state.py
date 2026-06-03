@@ -19,10 +19,12 @@ class GraphState(TypedDict, total=False):
     # Loop counters
     current_loop: str   # "design_build" | "build_verify"
     current_node: str
-    iteration: int
-    design_ux_iterations: int
-    build_iterations: int
-    verify_retries: int
+    iteration: int  # global design-revision counter (skeleton-phase bound)
+    # Unified per-slice rework budget (§2.3): one counter for every rework loop
+    # (design⇄ux, friction→design, verify-fail→build, ux-reject→design,
+    # reviewer-reject→build). Reset when a new feature slice enters "building".
+    slice_rework_budget: int
+    slice_rework_used: int
 
     # Routing flags
     skeleton_verified: bool
@@ -36,9 +38,7 @@ class GraphState(TypedDict, total=False):
     slices_planned: bool
     design_ux_needs_revision: bool
     ux_issues_found: bool
-    ux_review_attempts: int
     reviewer_rejected: bool
-    reviewer_attempts: int
     human_gate_action: str | None  # "approve" | "reject"
     experience_metric: dict
 

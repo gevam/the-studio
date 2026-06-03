@@ -1,4 +1,4 @@
-"""Unit tests for the Sprint 2 routers (§2.3) — steps 4 & 5 logic."""
+"""Unit tests for the Sprint 2 routers (§2.3) — unified per-slice rework budget."""
 
 from __future__ import annotations
 
@@ -13,13 +13,8 @@ from studio.graph.edges import (
 )
 
 
-def test_feature_friction_loop_is_capped():
-    cfg = {"config": {"max_feature_build_attempts": 3}}
-    under = {**cfg, "pending_friction_ids": ["f"], "build_iterations": 1}
-    capped = {**cfg, "pending_friction_ids": ["f"], "build_iterations": 3}
-    assert feature_friction_router(under) == "design_agent"  # under the cap → revise
-    assert feature_friction_router(capped) == "verify"  # cap reached → stop churning
-    assert feature_friction_router({**cfg, "pending_friction_ids": []}) == "verify"
+def _state(used: int, budget: int = 3, **extra) -> dict:
+    return {"slice_rework_budget": budget, "slice_rework_used": used, **extra}
 
 
 def test_design_agent_router_is_phase_aware():
@@ -28,43 +23,47 @@ def test_design_agent_router_is_phase_aware():
     assert design_agent_router({"phase": "build", "error": "x"}) == "complete"
 
 
-def test_design_ux_loop_respects_limit():
-    # needs revision + under limit → loop back to design
-    s = {"design_ux_needs_revision": True, "design_ux_iterations": 1,
-         "config": {"max_design_ux_loops": 3}}
-    assert design_ux_router(s) == "design_agent"
-    # at the limit → converge to skeleton
-    s["design_ux_iterations"] = 3
-    assert design_ux_router(s) == "skeleton_build"
-    # no revision needed → proceed
-    assert design_ux_router({"design_ux_needs_revision": False}) == "skeleton_build"
+def test_every_rework_loop_shares_one_budget():
+    # Under budget → rework; at/over budget → accept-on-cap and move forward.
+    assert design_ux_router(_state(1, design_ux_needs_revision=True)) == "design_agent"
+    assert design_ux_router(_state(3, design_ux_needs_revision=True)) == "skeleton_build"
+
+    assert feature_friction_router(_state(1, pending_friction_ids=["f"])) == "design_agent"
+    assert feature_friction_router(_state(3, pending_friction_ids=["f"])) == "verify"
+
+    assert ux_review_router(_state(1, ux_issues_found=True)) == "design_agent"
+    assert ux_review_router(_state(3, ux_issues_found=True)) == "reviewer"
+
+    assert reviewer_router(_state(1, reviewer_rejected=True)) == "build_agent"
+    assert reviewer_router(_state(3, reviewer_rejected=True)) == "slice_done"
 
 
-def test_verify_router_retries_build_then_design():
-    fail = {"verification_passed": False}
-    assert verify_router({**fail, "verify_retries": 0}) == "build_agent"
-    assert verify_router({**fail, "verify_retries": 2}) == "build_agent"
-    assert verify_router({**fail, "verify_retries": 3}) == "design_agent"  # exhausted
-    assert verify_router({"verification_passed": True}) == "ux_review"
+def test_verify_fail_accepts_on_cap_instead_of_looping_to_design():
+    # CR #1 regression: the old verify_retries<3→design path was unbounded. The
+    # shared budget now retries build while budget remains, then accepts forward.
+    assert verify_router(_state(0, verification_passed=False)) == "build_agent"
+    assert verify_router(_state(2, verification_passed=False)) == "build_agent"
+    assert verify_router(_state(3, verification_passed=False)) == "ux_review"  # not design!
+    assert verify_router(_state(0, verification_passed=True)) == "ux_review"
 
 
-def test_ux_review_and_reviewer_and_slice_done_routers():
-    assert ux_review_router({"ux_issues_found": True}) == "design_agent"
-    assert ux_review_router({"ux_issues_found": False}) == "reviewer"
-    assert reviewer_router({"reviewer_rejected": True}) == "build_agent"
-    assert reviewer_router({"reviewer_rejected": False}) == "slice_done"
+def test_no_signal_proceeds_forward():
+    assert design_ux_router(_state(0, design_ux_needs_revision=False)) == "skeleton_build"
+    assert feature_friction_router(_state(0, pending_friction_ids=[])) == "verify"
+    assert ux_review_router(_state(0, ux_issues_found=False)) == "reviewer"
+    assert reviewer_router(_state(0, reviewer_rejected=False)) == "slice_done"
+
+
+def test_budget_falls_back_to_config_when_state_unset():
+    # No slice_rework_budget in state → read from config.
+    s = {"config": {"slice_rework_budget": 2}, "slice_rework_used": 2,
+         "ux_issues_found": True}
+    assert ux_review_router(s) == "reviewer"  # used(2) >= budget(2) → forward
+
+
+def test_slice_done_and_error_routing():
     assert slice_done_router({"remaining_slice_ids": ["x"]}) == "slice_plan"
     assert slice_done_router({"remaining_slice_ids": []}) == "human_gate_ship"
-
-
-def test_review_loops_are_capped():
-    cfg = {"config": {"max_ux_review_loops": 2, "max_reviewer_loops": 2}}
-    # under cap → loop back; at cap → proceed forward (forces convergence)
-    ux_under = {**cfg, "ux_issues_found": True, "ux_review_attempts": 1}
-    ux_cap = {**cfg, "ux_issues_found": True, "ux_review_attempts": 2}
-    rev_under = {**cfg, "reviewer_rejected": True, "reviewer_attempts": 1}
-    rev_cap = {**cfg, "reviewer_rejected": True, "reviewer_attempts": 2}
-    assert ux_review_router(ux_under) == "design_agent"
-    assert ux_review_router(ux_cap) == "reviewer"
-    assert reviewer_router(rev_under) == "build_agent"
-    assert reviewer_router(rev_cap) == "slice_done"
+    for router in (design_ux_router, feature_friction_router, verify_router,
+                   ux_review_router, reviewer_router, slice_done_router):
+        assert router({"error": "boom"}) == "complete"

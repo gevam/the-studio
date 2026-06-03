@@ -135,7 +135,7 @@ async def test_all_three_loops_fire_in_one_session(session_factory, tmp_path, mo
     async with session_factory() as db:
         db.add(Session(id=sid, name="loops", status="created",
                        config={"project_path": str(project), "stack": "python",
-                               "auto_approve_gates": True, "max_design_ux_loops": 3,
+                               "auto_approve_gates": True, "slice_rework_budget": 5,
                                "max_design_iterations": 5}))
         await db.flush()
         db.add(Requirement(session_id=sid, title="Shorten URL", priority="high", status="active"))

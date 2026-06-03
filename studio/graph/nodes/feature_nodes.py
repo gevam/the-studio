@@ -45,7 +45,7 @@ async def ux_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) -> di
             context="design_review",
             project_name=session.name if session else "untitled",
             requirements=await _requirements(db, session_id),
-            iteration=state.get("design_ux_iterations", 0),
+            iteration=state.get("slice_rework_used", 0),
         ),
         db, llm, prompt_loader,
     )
@@ -65,10 +65,14 @@ async def ux_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) -> di
 
 
 async def design_ux_gate_node(state: GraphState, *, db, **_) -> dict:
-    """Convergence checkpoint for the Design⇄UX loop — counts iterations (§2.2)."""
+    """Convergence checkpoint for the Design⇄UX loop (§2.2).
+
+    Charges the shared rework budget when the UX agent asked for a revision.
+    """
+    used = state.get("slice_rework_used", 0)
     return {
         "current_node": "design_ux_gate",
-        "design_ux_iterations": state.get("design_ux_iterations", 0) + 1,
+        "slice_rework_used": used + (1 if state.get("design_ux_needs_revision") else 0),
     }
 
 
@@ -105,6 +109,8 @@ async def slice_plan_node(state: GraphState, *, db, llm, prompt_loader, **_) -> 
         "slices_planned": True,
         "current_slice_id": current,
         "remaining_slice_ids": remaining,
+        # New feature slice enters "building" → fresh rework budget for it.
+        "slice_rework_used": 0,
     }
 
 
@@ -129,7 +135,7 @@ async def build_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) ->
         session_id=session_id, design_digest=state.get("design_digest", ""),
         slice_name=slice_name, slice_description=slice_desc, slice_type="feature",
         project_name=session.name if session else "untitled", project_path=project_path,
-        stack=config.get("stack", "python"), iteration=state.get("build_iterations", 0),
+        stack=config.get("stack", "python"), iteration=state.get("slice_rework_used", 0),
     )
     try:
         output = await run_build_agent(agent_input, db, llm, prompt_loader)
@@ -153,7 +159,8 @@ async def build_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) ->
     return {
         "current_node": "build_agent",
         "pending_friction_ids": pending,
-        "build_iterations": state.get("build_iterations", 0) + 1,
+        # Friction here will drive a design rework → charge the shared budget.
+        "slice_rework_used": state.get("slice_rework_used", 0) + (1 if pending else 0),
         "tokens_used": state.get("tokens_used", 0) + output.tokens_used,
         "cost_usd": state.get("cost_usd", 0.0) + output.cost_usd,
     }
@@ -178,9 +185,8 @@ async def verify_node(state: GraphState, *, db, **_) -> dict:
     )
     delta = {"current_node": "verify", "verification_passed": result.passed}
     if not result.passed:
-        delta["verify_retries"] = state.get("verify_retries", 0) + 1
-    else:
-        delta["verify_retries"] = 0
+        # A failed verify will drive a build retry → charge the shared budget.
+        delta["slice_rework_used"] = state.get("slice_rework_used", 0) + 1
     return delta
 
 
@@ -208,7 +214,9 @@ async def ux_review_node(state: GraphState, *, db, llm, prompt_loader, **_) -> d
     return {
         "current_node": "ux_review",
         "ux_issues_found": out.review.needs_design_revision,
-        "ux_review_attempts": state.get("ux_review_attempts", 0) + 1,
+        # A UX issue drives a design rework → charge the shared budget.
+        "slice_rework_used": state.get("slice_rework_used", 0) + (
+            1 if out.review.needs_design_revision else 0),
         "tokens_used": state.get("tokens_used", 0) + out.tokens_used,
         "cost_usd": state.get("cost_usd", 0.0) + out.cost_usd,
     }
@@ -243,10 +251,12 @@ async def reviewer_node(state: GraphState, *, db, llm, prompt_loader, **_) -> di
         ),
         db, llm, prompt_loader,
     )
+    rejected = not result.output.passed
     return {
         "current_node": "reviewer",
-        "reviewer_rejected": not result.output.passed,
-        "reviewer_attempts": state.get("reviewer_attempts", 0) + 1,
+        "reviewer_rejected": rejected,
+        # A rejection drives a rebuild → charge the shared budget.
+        "slice_rework_used": state.get("slice_rework_used", 0) + (1 if rejected else 0),
         "tokens_used": state.get("tokens_used", 0) + result.tokens_used,
         "cost_usd": state.get("cost_usd", 0.0) + result.cost_usd,
     }
@@ -262,12 +272,8 @@ async def slice_done_node(state: GraphState, *, db, **_) -> dict:
         if slice_row:
             slice_row.status = "done"
             await db.flush()
+    # The next slice's budget is reset in slice_plan_node when it enters "building".
     return {
         "current_node": "slice_done",
         "current_slice_id": None,
-        # reset per-slice loop budgets for the next slice
-        "verify_retries": 0,
-        "build_iterations": 0,
-        "ux_review_attempts": 0,
-        "reviewer_attempts": 0,
     }

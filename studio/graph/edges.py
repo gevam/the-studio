@@ -42,9 +42,21 @@ def design_to_build_router(state: GraphState) -> str:
 # Every router short-circuits to "complete" on a hard error (e.g. budget). The
 # design_agent return edge is phase-aware: in the design phase it re-enters the
 # Design⇄UX loop, in the build phase it returns to the feature build.
+#
+# All rework loops (design⇄ux, friction→design, verify-fail→build, ux-reject→
+# design, reviewer-reject→build) share ONE per-slice budget: `slice_rework_used`
+# vs `slice_rework_budget`. The source node increments `slice_rework_used` when it
+# emits a rework signal; the router reworks while there is budget left, and
+# otherwise accepts-on-cap and proceeds forward — which is what bounds every loop
+# (the Sprint-2 CR found the old per-loop counters left verify→design unbounded).
 
-def _max_design_ux(state: GraphState) -> int:
-    return (state.get("config") or {}).get("max_design_ux_loops", 3)
+
+def _rework_budget_left(state: GraphState) -> bool:
+    used = state.get("slice_rework_used", 0)
+    budget = state.get("slice_rework_budget") or (state.get("config") or {}).get(
+        "slice_rework_budget", 8
+    )
+    return used < budget
 
 
 def design_agent_router(state: GraphState) -> str:
@@ -58,8 +70,7 @@ def design_ux_router(state: GraphState) -> str:
     """After the Design⇄UX gate: loop back to design, or proceed to the skeleton."""
     if state.get("error"):
         return "complete"
-    needs = state.get("design_ux_needs_revision")
-    if needs and state.get("design_ux_iterations", 0) < _max_design_ux(state):
+    if state.get("design_ux_needs_revision") and _rework_budget_left(state):
         return "design_agent"
     return "skeleton_build"
 
@@ -92,46 +103,43 @@ def human_gate_design_router(state: GraphState) -> str:
 
 
 def feature_friction_router(state: GraphState) -> str:
-    """After a feature build: design friction → design (capped), else verify.
-
-    Capped by build attempts for the current slice: a design revision doesn't
-    necessarily eliminate code-level friction, so without a bound the
-    build→friction→design loop can churn indefinitely. After the cap we proceed to
-    verify and let the deterministic checks gate quality.
-    """
+    """After a feature build: design friction → design while budget remains, else verify."""
     if state.get("error"):
         return "complete"
-    max_build = (state.get("config") or {}).get("max_feature_build_attempts", 3)
-    if state.get("pending_friction_ids") and state.get("build_iterations", 0) < max_build:
+    if state.get("pending_friction_ids") and _rework_budget_left(state):
         return "design_agent"
     return "verify"
 
 
 def verify_router(state: GraphState) -> str:
-    """After verify: pass → UX review; fail → Build (retry, max 3) then Design (§2.3)."""
+    """After verify: pass → UX review; fail → Build retry while budget remains.
+
+    On cap exhaustion we accept-and-proceed (→ ux_review) rather than looping back
+    to Design. The old `verify_retries < 3` → design path was unbounded: once
+    retries hit 3 every cycle routed to design with no reset, churning until the
+    recursion limit (Sprint-2 CR #1). The shared budget now bounds it.
+    """
     if state.get("error"):
         return "complete"
     if not state.get("verification_passed", False):
-        return "build_agent" if state.get("verify_retries", 0) < 3 else "design_agent"
+        return "build_agent" if _rework_budget_left(state) else "ux_review"
     return "ux_review"
 
 
 def ux_review_router(state: GraphState) -> str:
-    """UX issue → design (capped per slice), else proceed to the reviewer."""
+    """UX issue → design while budget remains, else proceed to the reviewer."""
     if state.get("error"):
         return "complete"
-    cap = (state.get("config") or {}).get("max_ux_review_loops", 2)
-    if state.get("ux_issues_found") and state.get("ux_review_attempts", 0) < cap:
+    if state.get("ux_issues_found") and _rework_budget_left(state):
         return "design_agent"
     return "reviewer"
 
 
 def reviewer_router(state: GraphState) -> str:
-    """Reviewer reject → rebuild (capped per slice), else the slice is done."""
+    """Reviewer reject → rebuild while budget remains, else the slice is done."""
     if state.get("error"):
         return "complete"
-    cap = (state.get("config") or {}).get("max_reviewer_loops", 2)
-    if state.get("reviewer_rejected") and state.get("reviewer_attempts", 0) < cap:
+    if state.get("reviewer_rejected") and _rework_budget_left(state):
         return "build_agent"
     return "slice_done"
 

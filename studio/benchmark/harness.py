@@ -201,11 +201,10 @@ async def run_studio_benchmark(
             config={
                 "project_path": str(project_path),
                 "stack": "python",
-                # Modest loop caps keep a real-LLM run bounded while still letting
-                # each loop fire at least once.
+                # Skeleton-phase design-revision cap (uses the global `iteration`)
+                # plus one unified per-slice rework budget for every rework loop.
                 "max_design_iterations": 2,
-                "max_design_ux_loops": 1,
-                "max_feature_build_attempts": 2,
+                "slice_rework_budget": 5,
                 # Non-interactive run: the design/ship gates auto-approve so the
                 # session completes; they still emit human.checkpoint/decision.
                 "auto_approve_gates": True,

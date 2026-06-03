@@ -1,5 +1,13 @@
-"""Adversarial convergence: even if every agent always complains, the capped
-loops must still drive the session to `complete`. Live DB; skipped if unreachable.
+"""Adversarial convergence: the single per-slice rework budget must bound the
+*total* rework across ALL loop types at once — friction, verify-fail, UX, and
+reviewer all firing every iteration — and still drive the session to `completed`.
+
+This is the test that would have caught CR #1: the UX agent always asks for a
+revision, the build always reports friction, the reviewer always rejects, AND
+every feature verify fails. With the old per-loop counters the verify→design path
+was unbounded (recursion limit); the shared budget accepts-on-cap and converges.
+
+Live DB; skipped if unreachable.
 """
 
 from __future__ import annotations
@@ -82,21 +90,28 @@ async def test_session_converges_despite_always_complaining_agents(
 
     from studio.verification.runner import VerificationResult
 
-    async def _verify_pass(**kwargs):
+    # Skeleton verify passes (so we reach the feature phase); EVERY feature verify
+    # then fails. This is the CR #1 scenario: the old verify_retries<3→design path
+    # looped to the recursion limit. The shared budget must bound build⇄verify and
+    # accept-on-cap so the session still reaches `completed`.
+    verifies = {"n": 0}
+
+    async def _verify(**kwargs):
+        verifies["n"] += 1
+        passed = verifies["n"] == 1  # only the skeleton verify passes
         return VerificationResult(
-            passed=True, build_passed=True, test_passed=True, lint_passed=True,
+            passed=passed, build_passed=passed, test_passed=passed, lint_passed=True,
             coverage_pct=85.0, tests_run=3, tests_passed=3, tests_failed=0,
             build_output="", test_output="", lint_output="", duration_ms=1, check_results=[])
 
-    monkeypatch.setattr("studio.verification.runner.run_verification", _verify_pass)
+    monkeypatch.setattr("studio.verification.runner.run_verification", _verify)
 
     sid = uuid.uuid4()
     async with session_factory() as db:
         db.add(Session(id=sid, name="adv", status="created",
                        config={"project_path": str(project), "stack": "python",
-                               "auto_approve_gates": True, "max_design_ux_loops": 1,
-                               "max_design_iterations": 2, "max_feature_build_attempts": 2,
-                               "max_ux_review_loops": 2, "max_reviewer_loops": 2}))
+                               "auto_approve_gates": True, "slice_rework_budget": 3,
+                               "max_design_iterations": 2}))
         await db.flush()
         db.add(Requirement(session_id=sid, title="Req A", priority="high", status="active"))
         await db.commit()

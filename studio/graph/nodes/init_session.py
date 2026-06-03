@@ -54,4 +54,6 @@ async def init_session_node(state: GraphState, *, db, **_) -> dict:
         "token_budget": session.token_budget,
         "cost_budget": float(session.cost_budget),
         "config": session.config or {},
+        "slice_rework_budget": (session.config or {}).get("slice_rework_budget", 8),
+        "slice_rework_used": 0,
     }

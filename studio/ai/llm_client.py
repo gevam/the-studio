@@ -268,6 +268,12 @@ class ClaudeCLIProvider:
         # repo and wander off-task (it is a coding agent, not a bare model).
         self._cwd = tempfile.mkdtemp(prefix="studio-cli-provider-")
 
+    def __del__(self) -> None:
+        # Best-effort cleanup of the per-instance temp working dir.
+        import shutil
+
+        shutil.rmtree(getattr(self, "_cwd", ""), ignore_errors=True)
+
     def _find_cli(self) -> str:
         import shutil
 
@@ -378,9 +384,13 @@ class ClaudeCLIProvider:
         temperature: float,
         model: str,
     ) -> StructuredResponse:
-        # The CLI has no tool-calling surface, so we constrain via the JSON Schema
-        # and validate the result — the only path that is not native structured
-        # output, kept for offline (Max-subscription) runs.
+        """Best-effort structured output — NOT native, unlike the SDK providers.
+
+        The claude CLI has no tool-calling surface, so this constrains the model
+        with the JSON Schema in the prompt and parses the reply. Kept only for
+        offline (Max-subscription) runs; raises StructuredOutputError when the
+        reply isn't schema-valid so LLMClient can retry / the node can degrade.
+        """
         schema_json = json.dumps(schema.model_json_schema())
         instruction = (
             f"{system}\n\nOutput ONLY a single JSON object matching this schema. "

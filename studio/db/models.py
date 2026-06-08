@@ -154,6 +154,10 @@ class Slice(Base):
     cyclomatic_complexity: Mapped[float | None] = mapped_column(Numeric(5, 2))
     coupling_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     duplication_pct: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    # Rework accounting (§2.3): how much of the per-slice budget this slice used,
+    # and whether it was force-accepted on cap exhaustion vs. genuinely converged.
+    rework_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    accepted_under_cap: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
     )

@@ -14,6 +14,22 @@ from studio.graph.edges import (
 from studio.graph.state import GraphState
 
 
+def _make_inject(db_factory, llm, prompt_loader):
+    """Wrap a node fn so it runs in a fresh DB session, committed on return.
+
+    Shared by both graph builders so node dependency-injection lives in one place.
+    """
+    def _inject(fn):
+        async def wrapped(state: GraphState) -> dict:
+            async with db_factory() as db:
+                result = await fn(state, db=db, llm=llm, prompt_loader=prompt_loader)
+                await db.commit()
+                return result
+        wrapped.__name__ = fn.__name__
+        return wrapped
+    return _inject
+
+
 def build_sprint1_graph(
     db_factory,  # callable returning AsyncSession (context manager)
     llm,         # LLMClient
@@ -38,21 +54,7 @@ def build_sprint1_graph(
     from studio.graph.nodes.skeleton_build import skeleton_build_node
     from studio.graph.nodes.skeleton_verify import skeleton_verify_node
 
-    # Inject dependencies into each node via closure
-    def _inject(fn):
-        async def wrapped(state: GraphState) -> dict:
-            async with db_factory() as db:
-                result = await fn(
-                    state,
-                    db=db,
-                    llm=llm,
-                    prompt_loader=prompt_loader,
-                )
-                await db.commit()
-                return result
-        wrapped.__name__ = fn.__name__
-        return wrapped
-
+    _inject = _make_inject(db_factory, llm, prompt_loader)
     graph = StateGraph(GraphState)
 
     graph.add_node("init_session", _inject(init_session_node))
@@ -135,15 +137,7 @@ def build_sprint2_graph(db_factory, llm, prompt_loader, *, checkpointer=None):  
     from studio.graph.nodes.skeleton_build import skeleton_build_node
     from studio.graph.nodes.skeleton_verify import skeleton_verify_node
 
-    def _inject(fn):
-        async def wrapped(state: GraphState) -> dict:
-            async with db_factory() as db:
-                result = await fn(state, db=db, llm=llm, prompt_loader=prompt_loader)
-                await db.commit()
-                return result
-        wrapped.__name__ = fn.__name__
-        return wrapped
-
+    _inject = _make_inject(db_factory, llm, prompt_loader)
     g = StateGraph(GraphState)
     nodes = {
         "init_session": init_session_node,

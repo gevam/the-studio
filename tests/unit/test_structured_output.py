@@ -69,3 +69,37 @@ async def test_llm_client_complete_structured_routes_and_returns_parsed():
     )
     assert result.parsed.score == 3
     client._provider.complete_structured.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_complete_structured_retries_once_then_raises():
+    # Provider always fails → LLMClient retries exactly once, then raises.
+    from studio.ai.llm_client import StructuredOutputError
+
+    client = LLMClient(provider="claude_cli")
+    client._provider = AsyncMock()
+    client._provider.complete_structured = AsyncMock(
+        side_effect=StructuredOutputError("no valid JSON"),
+    )
+    with pytest.raises(StructuredOutputError):
+        await client.complete_structured(
+            agent="reviewer", system_prompt="s", user_content="u", schema=Sample,
+        )
+    assert client._provider.complete_structured.await_count == 2  # initial + 1 retry
+
+
+@pytest.mark.asyncio
+async def test_complete_structured_recovers_on_retry():
+    from studio.ai.llm_client import StructuredOutputError
+
+    client = LLMClient(provider="claude_cli")
+    client._provider = AsyncMock()
+    client._provider.complete_structured = AsyncMock(side_effect=[
+        StructuredOutputError("bad"),
+        StructuredResponse(parsed=Sample(name="ok", score=5), tokens_in=1, tokens_out=1,
+                           cost_usd=0.0, model="m", latency_ms=1),
+    ])
+    result = await client.complete_structured(
+        agent="reviewer", system_prompt="s", user_content="u", schema=Sample,
+    )
+    assert result.parsed.score == 5

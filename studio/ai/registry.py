@@ -72,9 +72,9 @@ class ProviderRegistry:
         )
 
         if provider_name == "anthropic":
-            return AnthropicProvider()
+            return AnthropicProvider(settings.anthropic_api_key)
         if provider_name == "openai":
-            return OpenAIProvider()
+            return OpenAIProvider(settings.openai_api_key)
         if provider_name == "claude_cli":
             return ClaudeCLIProvider()
         raise ValueError(f"Unknown provider: {provider_name!r}")

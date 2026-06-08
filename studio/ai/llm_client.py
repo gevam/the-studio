@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 import structlog
+from pydantic import ValidationError
 
 logger = structlog.get_logger(__name__)
 
@@ -91,6 +92,16 @@ class StructuredResponse:
     latency_ms: int
 
 
+class StructuredOutputError(RuntimeError):
+    """A provider could not produce schema-valid structured output.
+
+    Raised by a provider's complete_structured on a refusal, a missing/empty
+    tool-use block, a None parse, or unparseable text. LLMClient retries once with
+    a reminder; if it still fails, this propagates to the node, which marks the
+    session errored (same handling as BudgetExceeded) rather than crashing the graph.
+    """
+
+
 @runtime_checkable
 class LLMProvider(Protocol):
     async def complete(
@@ -121,12 +132,13 @@ class LLMProvider(Protocol):
 class AnthropicProvider:
     """LLM provider using Anthropic's AsyncAnthropic SDK with cache_control on system."""
 
-    def __init__(self) -> None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY") or ""
+    def __init__(self, api_key: str) -> None:
+        # Key is passed in by the registry from settings — single source of truth,
+        # so the registry's availability check and this constructor never disagree.
         if not api_key:
             raise RuntimeError(
-                "ANTHROPIC_API_KEY is not set. "
-                "Set the env var or use provider='claude_cli'."
+                "Anthropic API key is empty. "
+                "Set anthropic_api_key or use provider='claude_cli'."
             )
         try:
             from anthropic import AsyncAnthropic  # type: ignore[import]
@@ -210,14 +222,22 @@ class AnthropicProvider:
         )
         latency_ms = int((time.monotonic() - start) * 1000)
 
-        tool_input = next(
-            (block.input for block in response.content if getattr(block, "type", "") == "tool_use"),
-            {},
+        tool_block = next(
+            (b for b in response.content if getattr(b, "type", "") == "tool_use"), None,
         )
         tokens_in = response.usage.input_tokens
         tokens_out = response.usage.output_tokens
+        if tool_block is None:
+            raise StructuredOutputError(
+                f"Anthropic returned no tool_use block for {schema.__name__} "
+                f"(stop_reason={getattr(response, 'stop_reason', '?')})"
+            )
+        try:
+            parsed = schema(**tool_block.input)
+        except ValidationError as exc:
+            raise StructuredOutputError(f"{schema.__name__} validation failed: {exc}") from exc
         return StructuredResponse(
-            parsed=schema(**tool_input),
+            parsed=parsed,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_usd=_compute_cost(model, tokens_in, tokens_out),
@@ -247,6 +267,16 @@ class ClaudeCLIProvider:
         # Run the agent CLI in an isolated empty dir so it cannot read the host
         # repo and wander off-task (it is a coding agent, not a bare model).
         self._cwd = tempfile.mkdtemp(prefix="studio-cli-provider-")
+
+    def __del__(self) -> None:
+        # Best-effort cleanup of the per-instance temp working dir. Guarded because
+        # __del__ can run during interpreter shutdown when imports are unavailable.
+        try:
+            import shutil
+
+            shutil.rmtree(getattr(self, "_cwd", ""), ignore_errors=True)
+        except Exception:  # noqa: BLE001 — never raise from a finalizer
+            pass
 
     def _find_cli(self) -> str:
         import shutil
@@ -358,22 +388,35 @@ class ClaudeCLIProvider:
         temperature: float,
         model: str,
     ) -> StructuredResponse:
-        # The CLI has no tool-calling surface, so we constrain via the JSON Schema
-        # and validate the result — the only path that is not native structured
-        # output, kept for offline (Max-subscription) runs.
+        """Best-effort structured output — NOT native, unlike the SDK providers.
+
+        The claude CLI has no tool-calling surface, so this constrains the model
+        with the JSON Schema in the prompt and parses the reply. Kept only for
+        offline (Max-subscription) runs; raises StructuredOutputError when the
+        reply isn't schema-valid so LLMClient can retry / the node can degrade.
+        """
         schema_json = json.dumps(schema.model_json_schema())
         instruction = (
             f"{system}\n\nOutput ONLY a single JSON object matching this schema. "
             "Start your reply with { and output nothing else — no preamble, no "
             f"explanation, no markdown code fences:\n{schema_json}"
         )
-        response = await self.complete(
-            messages, system=instruction, max_tokens=max_tokens,
-            temperature=temperature, model=model,
-        )
-        data = _extract_json_object(response.content)
+        try:
+            response = await self.complete(
+                messages, system=instruction, max_tokens=max_tokens,
+                temperature=temperature, model=model,
+            )
+            parsed = schema(**_extract_json_object(response.content))
+        except RuntimeError as exc:
+            # Transient CLI subprocess failure (non-zero exit / timeout). Surface as
+            # StructuredOutputError so LLMClient retries once and the node can degrade.
+            raise StructuredOutputError(f"CLI call failed for {schema.__name__}: {exc}") from exc
+        except (ValueError, ValidationError) as exc:
+            raise StructuredOutputError(
+                f"CLI did not return schema-valid JSON for {schema.__name__}: {exc}"
+            ) from exc
         return StructuredResponse(
-            parsed=schema(**data),
+            parsed=parsed,
             tokens_in=response.tokens_in,
             tokens_out=response.tokens_out,
             cost_usd=response.cost_usd,
@@ -385,12 +428,10 @@ class ClaudeCLIProvider:
 class OpenAIProvider:
     """LLM provider using OpenAI's AsyncOpenAI SDK (for the Reviewer's different family)."""
 
-    def __init__(self) -> None:
-        from studio.config import settings
-
-        api_key = settings.openai_api_key or os.environ.get("OPENAI_API_KEY") or ""
+    def __init__(self, api_key: str) -> None:
+        # Key passed in by the registry from settings (single source of truth).
         if not api_key:
-            raise RuntimeError("OPENAI_API_KEY is not set; cannot use the OpenAI provider.")
+            raise RuntimeError("OpenAI API key is empty; cannot use the OpenAI provider.")
         try:
             from openai import AsyncOpenAI  # type: ignore[import]
         except ImportError as exc:
@@ -462,8 +503,14 @@ class OpenAIProvider:
         usage = completion.usage
         tokens_in = usage.prompt_tokens if usage else 0
         tokens_out = usage.completion_tokens if usage else 0
+        message = completion.choices[0].message
+        if getattr(message, "refusal", None) or message.parsed is None:
+            raise StructuredOutputError(
+                f"OpenAI returned no parsed {schema.__name__} "
+                f"(refusal={getattr(message, 'refusal', None)!r})"
+            )
         return StructuredResponse(
-            parsed=completion.choices[0].message.parsed,
+            parsed=message.parsed,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_usd=_compute_cost(model, tokens_in, tokens_out),
@@ -619,14 +666,30 @@ class LLMClient:
         provider, model = self._route(agent, model)
         llm_calls_total.labels(agent=agent, model=model).inc()
 
-        result = await provider.complete_structured(
-            [{"role": "user", "content": user_content}],
-            system=system_prompt,
-            schema=schema,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            model=model,
-        )
+        # One retry with an explicit reminder before giving up — a transient bad
+        # generation (refusal, stray prose, truncation) usually self-corrects.
+        attempts = [
+            user_content,
+            user_content + (
+                "\n\nReminder: respond with ONLY a single JSON object that exactly "
+                f"matches the {schema.__name__} schema — no prose, no code fences."
+            ),
+        ]
+        last_exc: StructuredOutputError | None = None
+        result = None
+        for attempt in attempts:
+            try:
+                result = await provider.complete_structured(
+                    [{"role": "user", "content": attempt}],
+                    system=system_prompt, schema=schema,
+                    max_tokens=max_tokens, temperature=temperature, model=model,
+                )
+                break
+            except StructuredOutputError as exc:
+                last_exc = exc
+                logger.warning("structured_output_retry", agent=agent, error=str(exc)[:200])
+        if result is None:
+            raise last_exc  # exhausted retries — propagate to the node
         llm_latency_seconds.labels(agent=agent, model=model).observe(result.latency_ms / 1000)
 
         if db is not None and session_id is not None:

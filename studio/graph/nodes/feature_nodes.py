@@ -11,9 +11,15 @@ import uuid
 import structlog
 from sqlalchemy import select
 
+from studio.ai.budget import BudgetExceeded
+from studio.ai.llm_client import StructuredOutputError
+from studio.graph.nodes._budget import abort_on_agent_failure
 from studio.graph.state import GraphState
 
 logger = structlog.get_logger(__name__)
+
+# Failures from any agent call that should cleanly stop the session (vs crash the graph).
+_AGENT_FAILURES = (BudgetExceeded, StructuredOutputError)
 
 
 async def _load_session(db, session_id):
@@ -38,17 +44,20 @@ async def ux_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) -> di
     session = await _load_session(db, session_id)
     config = (session.config or {}) if session else {}
 
-    out = await run_ux_agent(
-        UXAgentInput(
-            session_id=session_id,
-            design_digest=state.get("design_digest", ""),
-            context="design_review",
-            project_name=session.name if session else "untitled",
-            requirements=await _requirements(db, session_id),
-            iteration=state.get("design_ux_iterations", 0),
-        ),
-        db, llm, prompt_loader,
-    )
+    try:
+        out = await run_ux_agent(
+            UXAgentInput(
+                session_id=session_id,
+                design_digest=state.get("design_digest", ""),
+                context="design_review",
+                project_name=session.name if session else "untitled",
+                requirements=await _requirements(db, session_id),
+                iteration=state.get("slice_rework_used", 0),
+            ),
+            db, llm, prompt_loader,
+        )
+    except _AGENT_FAILURES as exc:
+        return await abort_on_agent_failure(db, session_id, exc, node="ux_agent")
     review = out.review
     metric = review.experience_metric.model_dump() if review.experience_metric else {}
     if session is not None and metric:
@@ -65,10 +74,14 @@ async def ux_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) -> di
 
 
 async def design_ux_gate_node(state: GraphState, *, db, **_) -> dict:
-    """Convergence checkpoint for the Design⇄UX loop — counts iterations (§2.2)."""
+    """Convergence checkpoint for the Design⇄UX loop (§2.2).
+
+    Charges the shared rework budget when the UX agent asked for a revision.
+    """
+    used = state.get("slice_rework_used", 0)
     return {
         "current_node": "design_ux_gate",
-        "design_ux_iterations": state.get("design_ux_iterations", 0) + 1,
+        "slice_rework_used": used + (1 if state.get("design_ux_needs_revision") else 0),
     }
 
 
@@ -82,17 +95,27 @@ async def slice_plan_node(state: GraphState, *, db, llm, prompt_loader, **_) -> 
 
     if not remaining and not state.get("slices_planned"):
         session = await _load_session(db, session_id)
-        result = await plan_slices(
-            SlicePlanInput(
-                session_id=session_id,
-                design_digest=state.get("design_digest", ""),
-                project_name=session.name if session else "untitled",
-                requirements=await _requirements(db, session_id),
-                iteration=state.get("iteration", 0),
-            ),
-            db, llm, prompt_loader,
-        )
+        try:
+            result = await plan_slices(
+                SlicePlanInput(
+                    session_id=session_id,
+                    design_digest=state.get("design_digest", ""),
+                    project_name=session.name if session else "untitled",
+                    requirements=await _requirements(db, session_id),
+                    iteration=state.get("iteration", 0),
+                ),
+                db, llm, prompt_loader,
+            )
+        except _AGENT_FAILURES as exc:
+            return await abort_on_agent_failure(db, session_id, exc, node="slice_plan")
         remaining = result.slice_ids
+        # Never ship an empty MVP: planning produced no in-scope slices (CR #5).
+        if not remaining:
+            from studio.graph.nodes._budget import abort_session
+            return await abort_session(
+                db, session_id, RuntimeError("slice planning produced no slices"),
+                node="slice_plan", error_type="no_slices_planned",
+            )
 
     current = remaining.pop(0) if remaining else None
     if current:
@@ -105,15 +128,15 @@ async def slice_plan_node(state: GraphState, *, db, llm, prompt_loader, **_) -> 
         "slices_planned": True,
         "current_slice_id": current,
         "remaining_slice_ids": remaining,
+        # New feature slice enters "building" → fresh rework budget for it.
+        "slice_rework_used": 0,
     }
 
 
 async def build_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) -> dict:
     """Build the current feature slice via the coding agent (TDD); collect friction."""
     from studio.agents.build import BuildAgentInput, run_build_agent
-    from studio.ai.budget import BudgetExceeded
     from studio.db.models import DesignFriction, Slice
-    from studio.graph.nodes._budget import abort_on_budget
 
     session_id = uuid.UUID(state["session_id"])
     session = await _load_session(db, session_id)
@@ -129,12 +152,12 @@ async def build_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) ->
         session_id=session_id, design_digest=state.get("design_digest", ""),
         slice_name=slice_name, slice_description=slice_desc, slice_type="feature",
         project_name=session.name if session else "untitled", project_path=project_path,
-        stack=config.get("stack", "python"), iteration=state.get("build_iterations", 0),
+        stack=config.get("stack", "python"), iteration=state.get("slice_rework_used", 0),
     )
     try:
         output = await run_build_agent(agent_input, db, llm, prompt_loader)
-    except BudgetExceeded as exc:
-        return await abort_on_budget(db, session_id, exc, node="build_agent")
+    except _AGENT_FAILURES as exc:
+        return await abort_on_agent_failure(db, session_id, exc, node="build_agent")
 
     if slice_row and output.metrics:
         from studio.graph.nodes.skeleton_build import _clamp_metric
@@ -153,7 +176,8 @@ async def build_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) ->
     return {
         "current_node": "build_agent",
         "pending_friction_ids": pending,
-        "build_iterations": state.get("build_iterations", 0) + 1,
+        # Friction here will drive a design rework → charge the shared budget.
+        "slice_rework_used": state.get("slice_rework_used", 0) + (1 if pending else 0),
         "tokens_used": state.get("tokens_used", 0) + output.tokens_used,
         "cost_usd": state.get("cost_usd", 0.0) + output.cost_usd,
     }
@@ -178,9 +202,8 @@ async def verify_node(state: GraphState, *, db, **_) -> dict:
     )
     delta = {"current_node": "verify", "verification_passed": result.passed}
     if not result.passed:
-        delta["verify_retries"] = state.get("verify_retries", 0) + 1
-    else:
-        delta["verify_retries"] = 0
+        # A failed verify will drive a build retry → charge the shared budget.
+        delta["slice_rework_used"] = state.get("slice_rework_used", 0) + 1
     return delta
 
 
@@ -194,21 +217,26 @@ async def ux_review_node(state: GraphState, *, db, llm, prompt_loader, **_) -> d
     slice_id = state.get("current_slice_id")
     slice_row = await db.get(Slice, uuid.UUID(slice_id)) if slice_id else None
 
-    out = await run_ux_agent(
-        UXAgentInput(
-            session_id=session_id, design_digest=state.get("design_digest", ""),
-            context="slice_review", project_name=session.name if session else "untitled",
-            experience_metric=state.get("experience_metric", {}),
-            slice_name=slice_row.name if slice_row else "slice",
-            slice_description=slice_row.description if slice_row else "",
-            iteration=state.get("iteration", 0),
-        ),
-        db, llm, prompt_loader,
-    )
+    try:
+        out = await run_ux_agent(
+            UXAgentInput(
+                session_id=session_id, design_digest=state.get("design_digest", ""),
+                context="slice_review", project_name=session.name if session else "untitled",
+                experience_metric=state.get("experience_metric", {}),
+                slice_name=slice_row.name if slice_row else "slice",
+                slice_description=slice_row.description if slice_row else "",
+                iteration=state.get("iteration", 0),
+            ),
+            db, llm, prompt_loader,
+        )
+    except _AGENT_FAILURES as exc:
+        return await abort_on_agent_failure(db, session_id, exc, node="ux_review")
     return {
         "current_node": "ux_review",
         "ux_issues_found": out.review.needs_design_revision,
-        "ux_review_attempts": state.get("ux_review_attempts", 0) + 1,
+        # A UX issue drives a design rework → charge the shared budget.
+        "slice_rework_used": state.get("slice_rework_used", 0) + (
+            1 if out.review.needs_design_revision else 0),
         "tokens_used": state.get("tokens_used", 0) + out.tokens_used,
         "cost_usd": state.get("cost_usd", 0.0) + out.cost_usd,
     }
@@ -229,45 +257,69 @@ async def reviewer_node(state: GraphState, *, db, llm, prompt_loader, **_) -> di
         .where(VerificationResult.passed.is_(True))
         .order_by(VerificationResult.created_at.desc()).limit(1)
     )
-    result = await run_reviewer(
-        ReviewerInput(
-            session_id=session_id, design_digest=state.get("design_digest", ""),
-            design_version=state.get("design_version", 1),
-            project_name=session.name if session else "untitled",
-            slice_id=uuid.UUID(slice_id) if slice_id else None,
-            slice_name=slice_row.name if slice_row else "slice",
-            slice_description=slice_row.description if slice_row else "",
-            coverage_pct=float(vr.test_coverage) if vr and vr.test_coverage else 0.0,
-            tests_run=vr.tests_run if vr else 0,
-            iteration=state.get("iteration", 0),
-        ),
-        db, llm, prompt_loader,
-    )
+    try:
+        result = await run_reviewer(
+            ReviewerInput(
+                session_id=session_id, design_digest=state.get("design_digest", ""),
+                design_version=state.get("design_version", 1),
+                project_name=session.name if session else "untitled",
+                slice_id=uuid.UUID(slice_id) if slice_id else None,
+                slice_name=slice_row.name if slice_row else "slice",
+                slice_description=slice_row.description if slice_row else "",
+                coverage_pct=float(vr.test_coverage) if vr and vr.test_coverage else 0.0,
+                tests_run=vr.tests_run if vr else 0,
+                iteration=state.get("iteration", 0),
+            ),
+            db, llm, prompt_loader,
+        )
+    except _AGENT_FAILURES as exc:
+        return await abort_on_agent_failure(db, session_id, exc, node="reviewer")
+    rejected = not result.output.passed
     return {
         "current_node": "reviewer",
-        "reviewer_rejected": not result.output.passed,
-        "reviewer_attempts": state.get("reviewer_attempts", 0) + 1,
+        "reviewer_rejected": rejected,
+        # A rejection drives a rebuild → charge the shared budget.
+        "slice_rework_used": state.get("slice_rework_used", 0) + (1 if rejected else 0),
         "tokens_used": state.get("tokens_used", 0) + result.tokens_used,
         "cost_usd": state.get("cost_usd", 0.0) + result.cost_usd,
     }
 
 
 async def slice_done_node(state: GraphState, *, db, **_) -> dict:
-    """Mark the current slice done; the router checks for remaining slices (§2.3)."""
+    """Mark the current slice done, recording rework usage (§2.3).
+
+    A slice reaching done with its rework budget exhausted was force-accepted on
+    cap, not genuinely converged — persist that distinction and emit
+    slice.accepted_under_cap so dashboards (§7.5) can tell the two apart. (Whether
+    cap-exhaustion should instead degrade/escalate is the tracked Sprint 3 decision.)
+    """
     from studio.db.models import Slice
+    from studio.events.emitter import emit_event
+
+    session_id = uuid.UUID(state["session_id"])
+    used = state.get("slice_rework_used", 0)
+    budget = state.get("slice_rework_budget") or (state.get("config") or {}).get(
+        "slice_rework_budget", 8
+    )
+    accepted_under_cap = used >= budget
 
     slice_id = state.get("current_slice_id")
     if slice_id:
         slice_row = await db.get(Slice, uuid.UUID(slice_id))
         if slice_row:
             slice_row.status = "done"
+            slice_row.rework_used = used
+            slice_row.accepted_under_cap = accepted_under_cap
             await db.flush()
+        if accepted_under_cap:
+            await emit_event(
+                db, session_id, "slice.accepted_under_cap",
+                data={"slice_id": slice_id, "rework_used": used, "rework_budget": budget},
+                agent="orchestrator",
+            )
+
+    # The next slice's budget is reset in slice_plan_node when it enters "building".
     return {
         "current_node": "slice_done",
         "current_slice_id": None,
-        # reset per-slice loop budgets for the next slice
-        "verify_retries": 0,
-        "build_iterations": 0,
-        "ux_review_attempts": 0,
-        "reviewer_attempts": 0,
     }

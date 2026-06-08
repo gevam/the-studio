@@ -24,6 +24,7 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         "slice.started",
         "slice.built",
         "slice.verified",
+        "slice.accepted_under_cap",
         # Verification
         "verification.result",
         # Reviewer
@@ -64,6 +65,7 @@ MANDATORY_FIELDS: dict[str, set[str]] = {
     "slice.started": {"slice_id", "slice_name", "slice_type"},
     "slice.built": {"slice_id", "files_changed", "tests_written", "friction_count"},
     "slice.verified": {"slice_id", "passed", "coverage", "complexity"},
+    "slice.accepted_under_cap": {"slice_id", "rework_used", "rework_budget"},
     "verification.result": {"build_passed", "test_passed", "lint_passed", "duration_ms"},
     "reviewer.evaluated": {"overall_score", "passed", "issues_count", "model_used"},
     "human.checkpoint": {"gate_type", "expires_at"},

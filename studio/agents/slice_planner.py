@@ -6,6 +6,7 @@ requirement, enforcing requirement→slice traceability.
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 
@@ -48,23 +49,49 @@ class SlicePlanResult:
     cost_usd: float
 
 
+def _tokens(text: str) -> set[str]:
+    """Significant lowercase word tokens (len ≥ 3) of a title."""
+    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) >= 3}
+
+
+def _fuzzy_matches(text: str, req_lower: list[str], req_tokens: list[set[str]]) -> bool:
+    """Case-insensitive substring (either direction) or shared-token match."""
+    t = text.strip().lower()
+    if not t:
+        return False
+    toks = _tokens(t)
+    for rl, rt in zip(req_lower, req_tokens, strict=False):
+        if t in rl or rl in t or (toks & rt):
+            return True
+    return False
+
+
 def detect_scope_creep(
     slices: list[PlannedSlice], requirement_titles: list[str]
-) -> tuple[list[PlannedSlice], list[str]]:
-    """Split planned slices into (in_scope, dropped_names).
+) -> tuple[list[PlannedSlice], list[str], bool]:
+    """Split planned slices into (in_scope, dropped_names, used_fallback).
 
-    A slice is in scope when it cites at least one known requirement title
-    (case-insensitive). Slices citing none are scope creep and are dropped.
+    A slice is in scope when its name or any cited requirement_title fuzzily
+    matches a real requirement (substring or shared significant token) — LLMs
+    paraphrase titles, so exact matching dropped legitimate slices (CR #5). If
+    fuzzy matching would drop *everything*, we keep all slices and signal a
+    fallback (never silently ship an empty MVP).
     """
-    known = {t.strip().lower() for t in requirement_titles}
+    req_lower = [t.strip().lower() for t in requirement_titles]
+    req_tokens = [_tokens(t) for t in requirement_titles]
+
     in_scope: list[PlannedSlice] = []
     dropped: list[str] = []
     for s in slices:
-        if any(r.strip().lower() in known for r in s.requirement_titles):
+        candidates = [s.name, *s.requirement_titles]
+        if any(_fuzzy_matches(c, req_lower, req_tokens) for c in candidates):
             in_scope.append(s)
         else:
             dropped.append(s.name)
-    return in_scope, dropped
+
+    if slices and not in_scope:
+        return slices, [], True  # fuzzy match too strict — keep all, flag fallback
+    return in_scope, dropped, False
 
 
 async def plan_slices(
@@ -106,9 +133,20 @@ async def plan_slices(
         db=db,
     )
     plan: SlicePlan = result.parsed
-    in_scope, dropped = detect_scope_creep(plan.slices, input.requirements)
+    in_scope, dropped, used_fallback = detect_scope_creep(plan.slices, input.requirements)
     if dropped:
         logger.warning("scope_creep_dropped", session_id=str(input.session_id), slices=dropped)
+    if used_fallback:
+        # Fuzzy match would have dropped every slice — keep them all rather than ship
+        # an empty MVP, and flag that traceability is uncertain for this plan.
+        logger.warning("scope_creep_fuzzy_fallback", session_id=str(input.session_id),
+                       slices=[s.name for s in plan.slices])
+        await emit_event(
+            db, input.session_id, "requirement.changed",
+            data={"requirement_id": "*", "change_type": "scope_fuzzy_fallback",
+                  "fuzzy_fallback": True, "slices_kept": len(plan.slices)},
+            agent="slice_planner",
+        )
 
     slice_ids: list[str] = []
     for i, s in enumerate(in_scope):

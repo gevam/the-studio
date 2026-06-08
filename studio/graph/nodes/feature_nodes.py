@@ -217,17 +217,20 @@ async def ux_review_node(state: GraphState, *, db, llm, prompt_loader, **_) -> d
     slice_id = state.get("current_slice_id")
     slice_row = await db.get(Slice, uuid.UUID(slice_id)) if slice_id else None
 
-    out = await run_ux_agent(
-        UXAgentInput(
-            session_id=session_id, design_digest=state.get("design_digest", ""),
-            context="slice_review", project_name=session.name if session else "untitled",
-            experience_metric=state.get("experience_metric", {}),
-            slice_name=slice_row.name if slice_row else "slice",
-            slice_description=slice_row.description if slice_row else "",
-            iteration=state.get("iteration", 0),
-        ),
-        db, llm, prompt_loader,
-    )
+    try:
+        out = await run_ux_agent(
+            UXAgentInput(
+                session_id=session_id, design_digest=state.get("design_digest", ""),
+                context="slice_review", project_name=session.name if session else "untitled",
+                experience_metric=state.get("experience_metric", {}),
+                slice_name=slice_row.name if slice_row else "slice",
+                slice_description=slice_row.description if slice_row else "",
+                iteration=state.get("iteration", 0),
+            ),
+            db, llm, prompt_loader,
+        )
+    except _AGENT_FAILURES as exc:
+        return await abort_on_agent_failure(db, session_id, exc, node="ux_review")
     return {
         "current_node": "ux_review",
         "ux_issues_found": out.review.needs_design_revision,

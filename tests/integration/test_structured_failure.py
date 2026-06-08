@@ -65,3 +65,35 @@ async def test_design_structured_failure_marks_session_error(session_factory):
                 await db.execute(text(f"DELETE FROM {tbl} WHERE session_id=:s"), {"s": sid})  # noqa: S608
             await db.execute(text("DELETE FROM sessions WHERE id=:s"), {"s": sid})
             await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_ux_review_structured_failure_marks_session_error(session_factory):
+    # Regression for the CR miss: ux_review_node (slice review) must also abort
+    # cleanly on a structured failure, like the other agent nodes.
+    from studio.graph.nodes.feature_nodes import ux_review_node
+
+    sid = uuid.uuid4()
+    async with session_factory() as db:
+        db.add(Session(id=sid, name="ux", status="running", config={}))
+        await db.commit()
+    try:
+        async with session_factory() as db:
+            delta = await ux_review_node(
+                {"session_id": str(sid), "current_slice_id": None},
+                db=db, llm=_failing_llm(), prompt_loader=_loader(),
+            )
+            await db.commit()
+        assert delta.get("error")
+        async with session_factory() as db:
+            session = await db.get(Session, sid)
+            assert session.status == "error"
+            types = {t for (t,) in (await db.execute(
+                select(EventLog.event_type).where(EventLog.session_id == sid))).all()}
+        assert "session.error" in types
+    finally:
+        async with session_factory() as db:
+            for tbl in ("event_log", "ai_feedback", "requirements"):
+                await db.execute(text(f"DELETE FROM {tbl} WHERE session_id=:s"), {"s": sid})  # noqa: S608
+            await db.execute(text("DELETE FROM sessions WHERE id=:s"), {"s": sid})
+            await db.commit()

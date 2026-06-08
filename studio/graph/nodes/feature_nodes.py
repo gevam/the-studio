@@ -286,15 +286,38 @@ async def reviewer_node(state: GraphState, *, db, llm, prompt_loader, **_) -> di
 
 
 async def slice_done_node(state: GraphState, *, db, **_) -> dict:
-    """Mark the current slice done; the router checks for remaining slices (§2.3)."""
+    """Mark the current slice done, recording rework usage (§2.3).
+
+    A slice reaching done with its rework budget exhausted was force-accepted on
+    cap, not genuinely converged — persist that distinction and emit
+    slice.accepted_under_cap so dashboards (§7.5) can tell the two apart. (Whether
+    cap-exhaustion should instead degrade/escalate is the tracked Sprint 3 decision.)
+    """
     from studio.db.models import Slice
+    from studio.events.emitter import emit_event
+
+    session_id = uuid.UUID(state["session_id"])
+    used = state.get("slice_rework_used", 0)
+    budget = state.get("slice_rework_budget") or (state.get("config") or {}).get(
+        "slice_rework_budget", 8
+    )
+    accepted_under_cap = used >= budget
 
     slice_id = state.get("current_slice_id")
     if slice_id:
         slice_row = await db.get(Slice, uuid.UUID(slice_id))
         if slice_row:
             slice_row.status = "done"
+            slice_row.rework_used = used
+            slice_row.accepted_under_cap = accepted_under_cap
             await db.flush()
+        if accepted_under_cap:
+            await emit_event(
+                db, session_id, "slice.accepted_under_cap",
+                data={"slice_id": slice_id, "rework_used": used, "rework_budget": budget},
+                agent="orchestrator",
+            )
+
     # The next slice's budget is reset in slice_plan_node when it enters "building".
     return {
         "current_node": "slice_done",

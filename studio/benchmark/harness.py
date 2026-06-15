@@ -205,6 +205,7 @@ async def run_studio_benchmark(
                 # plus one unified per-slice rework budget for every rework loop.
                 "max_design_iterations": 2,
                 "slice_rework_budget": 5,
+                "rework_trace": True,  # DIAGNOSTIC: emit rework.attempt events
                 # Non-interactive run: the design/ship gates auto-approve so the
                 # session completes; they still emit human.checkpoint/decision.
                 "auto_approve_gates": True,

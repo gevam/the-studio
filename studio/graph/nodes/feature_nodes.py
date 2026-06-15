@@ -14,6 +14,7 @@ from sqlalchemy import select
 from studio.ai.budget import BudgetExceeded
 from studio.ai.llm_client import StructuredOutputError
 from studio.graph.nodes._budget import abort_on_agent_failure
+from studio.graph.nodes._rework_trace import trace_rework  # diagnostic, gated
 from studio.graph.state import GraphState
 
 logger = structlog.get_logger(__name__)
@@ -173,6 +174,15 @@ async def build_agent_node(state: GraphState, *, db, llm, prompt_loader, **_) ->
         .where(DesignFriction.status == "open")
     )).scalars()]
 
+    if pending:
+        await trace_rework(
+            db, session_id, state, loop_type="friction",
+            slice_id=slice_id, slice_name=slice_name,
+            details={"friction": [
+                f"[{f.severity}/{f.category}] {f.description}" for f in output.friction_items
+            ]},
+        )
+
     return {
         "current_node": "build_agent",
         "pending_friction_ids": pending,
@@ -204,6 +214,12 @@ async def verify_node(state: GraphState, *, db, **_) -> dict:
     if not result.passed:
         # A failed verify will drive a build retry → charge the shared budget.
         delta["slice_rework_used"] = state.get("slice_rework_used", 0) + 1
+        await trace_rework(
+            db, session_id, state, loop_type="verify",
+            slice_id=slice_id, slice_name="",
+            details={"failed_checks": [c.name for c in result.check_results if not c.passed],
+                     "coverage_pct": result.coverage_pct},
+        )
     return delta
 
 
@@ -231,6 +247,15 @@ async def ux_review_node(state: GraphState, *, db, llm, prompt_loader, **_) -> d
         )
     except _AGENT_FAILURES as exc:
         return await abort_on_agent_failure(db, session_id, exc, node="ux_review")
+    if out.review.needs_design_revision:
+        await trace_rework(
+            db, session_id, state, loop_type="ux",
+            slice_id=slice_id, slice_name=slice_row.name if slice_row else "slice",
+            details={
+                "experience_score": out.review.experience_score,
+                "issues": [f"[{i.severity}] {i.description}" for i in out.review.issues],
+            },
+        )
     return {
         "current_node": "ux_review",
         "ux_issues_found": out.review.needs_design_revision,
@@ -275,6 +300,21 @@ async def reviewer_node(state: GraphState, *, db, llm, prompt_loader, **_) -> di
     except _AGENT_FAILURES as exc:
         return await abort_on_agent_failure(db, session_id, exc, node="reviewer")
     rejected = not result.output.passed
+    if rejected:
+        await trace_rework(
+            db, session_id, state, loop_type="reviewer",
+            slice_id=slice_id, slice_name=slice_row.name if slice_row else "slice",
+            details={
+                "overall_score": result.output.overall_score,
+                "passed": result.output.passed,
+                "issues": result.output.issues,
+                "rubric": [
+                    {"criterion": s.criterion, "score": s.score, "finding": s.finding}
+                    for s in result.output.rubric_scores
+                ],
+                "model_used": result.model_used,
+            },
+        )
     return {
         "current_node": "reviewer",
         "reviewer_rejected": rejected,

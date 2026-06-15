@@ -25,6 +25,7 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         "slice.built",
         "slice.verified",
         "slice.accepted_under_cap",
+        "rework.attempt",  # diagnostic (gated on config.rework_trace)
         # Verification
         "verification.result",
         # Reviewer
